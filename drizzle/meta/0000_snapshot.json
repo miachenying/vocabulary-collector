@@ -1,0 +1,61 @@
+{
+  "version": "6",
+  "dialect": "sqlite",
+  "id": "4f7f2d47-5e82-474b-b745-ed82cb2c2bd1",
+  "prevId": "00000000-0000-0000-0000-000000000000",
+  "tables": {
+    "lookup_events": {
+      "name": "lookup_events",
+      "columns": {
+        "id": {"name": "id", "type": "text", "primaryKey": true, "notNull": true, "autoincrement": false},
+        "entry_id": {"name": "entry_id", "type": "text", "primaryKey": false, "notNull": true, "autoincrement": false},
+        "user_id": {"name": "user_id", "type": "text", "primaryKey": false, "notNull": true, "autoincrement": false},
+        "looked_up_at": {"name": "looked_up_at", "type": "text", "primaryKey": false, "notNull": true, "autoincrement": false},
+        "context_sentence": {"name": "context_sentence", "type": "text", "primaryKey": false, "notNull": false, "autoincrement": false},
+        "source_title": {"name": "source_title", "type": "text", "primaryKey": false, "notNull": false, "autoincrement": false},
+        "source_url": {"name": "source_url", "type": "text", "primaryKey": false, "notNull": false, "autoincrement": false}
+      },
+      "indexes": {
+        "event_user_time_idx": {"name": "event_user_time_idx", "columns": ["user_id", "looked_up_at"], "isUnique": false},
+        "event_entry_time_idx": {"name": "event_entry_time_idx", "columns": ["entry_id", "looked_up_at"], "isUnique": false}
+      },
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {}
+    },
+    "vocabulary_entries": {
+      "name": "vocabulary_entries",
+      "columns": {
+        "id": {"name": "id", "type": "text", "primaryKey": true, "notNull": true, "autoincrement": false},
+        "user_id": {"name": "user_id", "type": "text", "primaryKey": false, "notNull": true, "autoincrement": false},
+        "normalized_term": {"name": "normalized_term", "type": "text", "primaryKey": false, "notNull": true, "autoincrement": false},
+        "display_term": {"name": "display_term", "type": "text", "primaryKey": false, "notNull": true, "autoincrement": false},
+        "language": {"name": "language", "type": "text", "primaryKey": false, "notNull": true, "autoincrement": false, "default": "'English'"},
+        "chinese_definition": {"name": "chinese_definition", "type": "text", "primaryKey": false, "notNull": false, "autoincrement": false},
+        "part_of_speech": {"name": "part_of_speech", "type": "text", "primaryKey": false, "notNull": false, "autoincrement": false},
+        "context_sentence": {"name": "context_sentence", "type": "text", "primaryKey": false, "notNull": false, "autoincrement": false},
+        "source_title": {"name": "source_title", "type": "text", "primaryKey": false, "notNull": false, "autoincrement": false},
+        "source_url": {"name": "source_url", "type": "text", "primaryKey": false, "notNull": false, "autoincrement": false},
+        "note": {"name": "note", "type": "text", "primaryKey": false, "notNull": false, "autoincrement": false},
+        "lookup_count": {"name": "lookup_count", "type": "integer", "primaryKey": false, "notNull": true, "autoincrement": false, "default": 1},
+        "first_looked_up_at": {"name": "first_looked_up_at", "type": "text", "primaryKey": false, "notNull": true, "autoincrement": false},
+        "last_looked_up_at": {"name": "last_looked_up_at", "type": "text", "primaryKey": false, "notNull": true, "autoincrement": false},
+        "created_at": {"name": "created_at", "type": "text", "primaryKey": false, "notNull": true, "autoincrement": false},
+        "updated_at": {"name": "updated_at", "type": "text", "primaryKey": false, "notNull": true, "autoincrement": false}
+      },
+      "indexes": {
+        "entry_user_term_unique": {"name": "entry_user_term_unique", "columns": ["user_id", "normalized_term"], "isUnique": true},
+        "entry_user_last_lookup_idx": {"name": "entry_user_last_lookup_idx", "columns": ["user_id", "last_looked_up_at"], "isUnique": false}
+      },
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {}
+    }
+  },
+  "views": {},
+  "enums": {},
+  "_meta": {"schemas": {}, "tables": {}, "columns": {}},
+  "internal": {"indexes": {}}
+}
