@@ -41,6 +41,14 @@ async function generateJson(prompt: string) {
   return JSON.parse(text) as unknown;
 }
 
+export function canonicalFormFromPayload(payload: unknown, fallback: string) {
+  const parsed = payload as { canonical_form?: unknown } | null;
+  const canonical = parsed && typeof parsed.canonical_form === "string"
+    ? parsed.canonical_form.trim()
+    : "";
+  return canonical || fallback;
+}
+
 export async function canonicalizeExpression(
   encounteredForm: string,
   context: string | null,
@@ -51,9 +59,7 @@ Rules:\n- Preserve the same semantic expression, not a broader or different phra
 Encountered form: ${encounteredForm}\n${context ? `Context: ${context}\n` : ""}Return exactly: {"canonical_form":"..."}`;
 
   try {
-    const parsed = await generateJson(prompt) as { canonical_form?: unknown };
-    const canonical = typeof parsed.canonical_form === "string" ? parsed.canonical_form.trim() : "";
-    return canonical || fallback;
+    return canonicalFormFromPayload(await generateJson(prompt), fallback);
   } catch (error) {
     console.error("Canonicalization failed; using deterministic fallback", error);
     return fallback;
@@ -64,10 +70,19 @@ export type SenseMatchDecision =
   | { matchType: "existing"; senseId: string }
   | { matchType: "new"; senseId: null };
 
-type ExistingSense = {
+export type ExistingSense = {
   id: string;
   chineseMeaning: string;
 };
+
+export function senseMatchFromPayload(payload: unknown, existingSenses: ExistingSense[]): SenseMatchDecision {
+  const parsed = payload as { match_type?: unknown; sense_id?: unknown } | null;
+  if (parsed?.match_type === "existing" && typeof parsed.sense_id === "string") {
+    const valid = existingSenses.some((sense) => sense.id === parsed.sense_id);
+    if (valid) return { matchType: "existing", senseId: parsed.sense_id };
+  }
+  return { matchType: "new", senseId: null };
+}
 
 export async function matchSemanticSense(
   expression: string,
@@ -84,12 +99,7 @@ Rules:\n- Match semantic sense, not exact wording.\n- Different translations can
 Return exactly one of:\n{"match_type":"existing","sense_id":"<existing id>"}\nor\n{"match_type":"new","sense_id":null}`;
 
   try {
-    const parsed = await generateJson(prompt) as { match_type?: unknown; sense_id?: unknown };
-    if (parsed.match_type === "existing" && typeof parsed.sense_id === "string") {
-      const valid = existingSenses.some((sense) => sense.id === parsed.sense_id);
-      if (valid) return { matchType: "existing", senseId: parsed.sense_id };
-    }
-    return { matchType: "new", senseId: null };
+    return senseMatchFromPayload(await generateJson(prompt), existingSenses);
   } catch (error) {
     console.error("Semantic sense matching failed; conservatively creating a new sense", error);
     return { matchType: "new", senseId: null };
