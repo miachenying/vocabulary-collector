@@ -4,7 +4,7 @@ import { ensureVocabularySchema, getVocabularyDb } from "@/lib/vocabulary/databa
 import { findEntry, findEntryById, mapEntry, updateChineseDefinition, upsertLookupEntry } from "@/lib/vocabulary/entries";
 import { createLookupEvent, deleteLookupEvent, getHistory } from "@/lib/vocabulary/history";
 import { classifyInputV2, normalizeTerm, nullableString } from "@/lib/vocabulary/input";
-import { generateChineseDefinition } from "@/lib/vocabulary/translation";
+import { getVocabularyMeaning } from "@/lib/vocabulary/meaning-provider";
 
 export const dynamic = "force-dynamic";
 
@@ -29,9 +29,6 @@ export async function POST(request: NextRequest) {
   const note = nullableString(body?.note);
   const inputTypeV2 = classifyInputV2(displayTerm);
 
-  // Milestone 2 dual-write: record the new Lookup History event without changing
-  // the Version 6 response contract. If the v2 mirror fails, the legacy lookup
-  // continues to work and the failure is visible in runtime logs.
   let v2LookupEventId: string | null = null;
   try {
     v2LookupEventId = await startV2Lookup({
@@ -77,14 +74,14 @@ export async function POST(request: NextRequest) {
 
   let warning: string | null = null;
   let definition = existing?.chinese_definition as string | null | undefined;
-  // Multi-word inputs are always regenerated. This preserves Version 6 behavior
-  // while translation is moved behind a dedicated service boundary.
   const isMultiWord = /\s/.test(displayTerm.trim());
   if (!definition || context || isMultiWord) {
     try {
-      definition = await generateChineseDefinition(displayTerm, context);
+      const meaning = await getVocabularyMeaning(displayTerm, inputTypeV2, context);
+      definition = meaning.chineseMeaning;
       await updateChineseDefinition(database, entryId, definition);
-    } catch {
+    } catch (error) {
+      console.error("Meaning provider failed", error);
       warning = "词已经保存，但这次中文解释暂时没有生成。请稍后再查一次。";
     }
   }
