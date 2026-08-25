@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { expressionsFromPayload } from "../lib/vocabulary/sentence-pipeline.ts";
+import { expressionsFromPayload } from "../lib/vocabulary/sentence-expressions.ts";
 
 test("keeps up to three valid reusable expressions from the sentence", () => {
   const sentence = "The proposal was met with skepticism, but she addressed the concerns head-on and eventually won them over.";
