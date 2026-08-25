@@ -1,8 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
+import { completeV2Lookup, failV2Lookup, startV2Lookup } from "@/lib/vocabulary/compatibility";
 import { ensureVocabularySchema, getVocabularyDb } from "@/lib/vocabulary/database";
 import { findEntry, findEntryById, mapEntry, updateChineseDefinition, upsertLookupEntry } from "@/lib/vocabulary/entries";
 import { createLookupEvent, deleteLookupEvent, getHistory } from "@/lib/vocabulary/history";
-import { normalizeTerm, nullableString } from "@/lib/vocabulary/input";
+import { classifyInputV2, normalizeTerm, nullableString } from "@/lib/vocabulary/input";
 import { generateChineseDefinition } from "@/lib/vocabulary/translation";
 
 export const dynamic = "force-dynamic";
@@ -26,6 +27,27 @@ export async function POST(request: NextRequest) {
   const sourceTitle = nullableString(body?.sourceTitle);
   const sourceUrl = nullableString(body?.sourceUrl);
   const note = nullableString(body?.note);
+  const inputTypeV2 = classifyInputV2(displayTerm);
+
+  // Milestone 2 dual-write: record the new Lookup History event without changing
+  // the Version 6 response contract. If the v2 mirror fails, the legacy lookup
+  // continues to work and the failure is visible in runtime logs.
+  let v2LookupEventId: string | null = null;
+  try {
+    v2LookupEventId = await startV2Lookup({
+      database,
+      userId: uid,
+      rawInput: displayTerm,
+      inputType: inputTypeV2,
+      contextSentence: context,
+      sourceTitle,
+      sourceUrl,
+      lookedUpAt: now,
+    });
+  } catch (error) {
+    console.error("Failed to start v2 lookup mirror", error);
+  }
+
   const existing = await findEntry(database, uid, normalized);
   const entryId = existing?.id as string | undefined ?? crypto.randomUUID();
 
@@ -64,6 +86,34 @@ export async function POST(request: NextRequest) {
       await updateChineseDefinition(database, entryId, definition);
     } catch {
       warning = "词已经保存，但这次中文解释暂时没有生成。请稍后再查一次。";
+    }
+  }
+
+  if (v2LookupEventId) {
+    if (definition && !warning) {
+      try {
+        await completeV2Lookup({
+          database,
+          userId: uid,
+          rawInput: displayTerm,
+          inputType: inputTypeV2,
+          contextSentence: context,
+          sourceTitle,
+          sourceUrl,
+          lookedUpAt: now,
+          lookupEventId: v2LookupEventId,
+          canonicalForm: normalized,
+          chineseMeaning: definition,
+        });
+      } catch (error) {
+        console.error("Failed to complete v2 lookup mirror", error);
+      }
+    } else {
+      try {
+        await failV2Lookup(database, uid, v2LookupEventId);
+      } catch (error) {
+        console.error("Failed to mark v2 lookup mirror as failed", error);
+      }
     }
   }
 
