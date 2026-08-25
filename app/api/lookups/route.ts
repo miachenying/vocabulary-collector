@@ -4,6 +4,7 @@ import { ensureVocabularySchema, getVocabularyDb } from "@/lib/vocabulary/databa
 import { findEntry, findEntryById, mapEntry, updateChineseDefinition, upsertLookupEntry } from "@/lib/vocabulary/entries";
 import { createLookupEvent, deleteLookupEvent, getHistory } from "@/lib/vocabulary/history";
 import { classifyInputV2, normalizeTerm, nullableString } from "@/lib/vocabulary/input";
+import { canonicalizeExpression } from "@/lib/vocabulary/language-judgment";
 import { getVocabularyMeaning } from "@/lib/vocabulary/meaning-provider";
 
 export const dynamic = "force-dynamic";
@@ -89,6 +90,10 @@ export async function POST(request: NextRequest) {
   if (v2LookupEventId) {
     if (definition && !warning) {
       try {
+        const canonicalForm = inputTypeV2 === "phrase"
+          ? await canonicalizeExpression(displayTerm, context, normalized)
+          : normalized;
+
         await completeV2Lookup({
           database,
           userId: uid,
@@ -99,7 +104,7 @@ export async function POST(request: NextRequest) {
           sourceUrl,
           lookedUpAt: now,
           lookupEventId: v2LookupEventId,
-          canonicalForm: normalized,
+          canonicalForm,
           chineseMeaning: definition,
         });
       } catch (error) {
