@@ -15,7 +15,8 @@
     "lint": "bash scripts/sites-env.sh -- eslint . --ignore-pattern dist --ignore-pattern .next",
     "db:generate": "bash scripts/sites-env.sh -- drizzle-kit generate",
     "test:m3": "node --experimental-strip-types --test tests/vocabulary-m3.test.mjs",
-    "eval:m3": "node --experimental-strip-types scripts/run-m3-evals.mjs"
+    "eval:m3": "node --experimental-strip-types scripts/run-m3-evals.mjs",
+    "test:m4": "node --experimental-strip-types --test tests/vocabulary-m4.test.mjs"
   },
   "dependencies": {
     "drizzle-orm": "0.45.2",

@@ -6,7 +6,7 @@ function geminiApiKey() {
   return (globalThis as typeof globalThis & { __GEMINI_API_KEY?: string }).__GEMINI_API_KEY;
 }
 
-async function generateJson(prompt: string) {
+export async function generateLanguageJson(prompt: string, maxOutputTokens = 200) {
   const apiKey = geminiApiKey();
   if (!apiKey) throw new Error("Gemini API key is not configured.");
 
@@ -27,7 +27,7 @@ async function generateJson(prompt: string) {
         contents: [{ role: "user", parts: [{ text: prompt }] }],
         generationConfig: {
           temperature: 0,
-          maxOutputTokens: 200,
+          maxOutputTokens,
           responseMimeType: "application/json",
         },
       }),
@@ -59,7 +59,7 @@ Rules:\n- Preserve the same semantic expression, not a broader or different phra
 Encountered form: ${encounteredForm}\n${context ? `Context: ${context}\n` : ""}Return exactly: {"canonical_form":"..."}`;
 
   try {
-    return canonicalFormFromPayload(await generateJson(prompt), fallback);
+    return canonicalFormFromPayload(await generateLanguageJson(prompt), fallback);
   } catch (error) {
     console.error("Canonicalization failed; using deterministic fallback", error);
     return fallback;
@@ -99,7 +99,7 @@ Rules:\n- Match semantic sense, not exact wording.\n- Different translations can
 Return exactly one of:\n{"match_type":"existing","sense_id":"<existing id>"}\nor\n{"match_type":"new","sense_id":null}`;
 
   try {
-    return senseMatchFromPayload(await generateJson(prompt), existingSenses);
+    return senseMatchFromPayload(await generateLanguageJson(prompt), existingSenses);
   } catch (error) {
     console.error("Semantic sense matching failed; conservatively creating a new sense", error);
     return { matchType: "new", senseId: null };

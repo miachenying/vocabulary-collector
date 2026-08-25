@@ -6,6 +6,7 @@ import { createLookupEvent, deleteLookupEvent, getHistory } from "@/lib/vocabula
 import { classifyInputV2, normalizeTerm, nullableString } from "@/lib/vocabulary/input";
 import { canonicalizeExpression } from "@/lib/vocabulary/language-judgment";
 import { getVocabularyMeaning } from "@/lib/vocabulary/meaning-provider";
+import { extractSentenceExpressions, type ExtractedExpression } from "@/lib/vocabulary/sentence-pipeline";
 
 export const dynamic = "force-dynamic";
 
@@ -75,6 +76,7 @@ export async function POST(request: NextRequest) {
 
   let warning: string | null = null;
   let definition = existing?.chinese_definition as string | null | undefined;
+  let sentenceExpressions: ExtractedExpression[] = [];
   const isMultiWord = /\s/.test(displayTerm.trim());
   if (!definition || context || isMultiWord) {
     try {
@@ -85,6 +87,10 @@ export async function POST(request: NextRequest) {
       console.error("Meaning provider failed", error);
       warning = "词已经保存，但这次中文解释暂时没有生成。请稍后再查一次。";
     }
+  }
+
+  if (inputTypeV2 === "sentence" && definition && !warning) {
+    sentenceExpressions = await extractSentenceExpressions(displayTerm);
   }
 
   if (v2LookupEventId) {
@@ -123,6 +129,9 @@ export async function POST(request: NextRequest) {
   return NextResponse.json({
     entry: entry ? mapEntry(entry) : null,
     warning,
+    sentenceAnalysis: inputTypeV2 === "sentence" && definition
+      ? { translation: definition, expressions: sentenceExpressions }
+      : null,
   }, { status: warning ? 202 : 200 });
 }
 
