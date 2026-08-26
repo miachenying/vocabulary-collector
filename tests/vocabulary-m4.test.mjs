@@ -37,6 +37,32 @@ test("rejects hallucinated expressions that do not occur in the sentence", () =>
   ]);
 });
 
+test("rejects low-value modifier-only expressions", () => {
+  const sentence = "Her explanation doesn't quite add up.";
+  assert.deepEqual(expressionsFromPayload({
+    expressions: [
+      { encountered_form: "add up", canonical_form: "add up", reason: "phrasal_verb" },
+      { encountered_form: "not quite", canonical_form: "not quite", reason: "contextual_expression" },
+    ],
+  }, sentence), [
+    { encounteredForm: "add up", canonicalForm: "add up", reason: "phrasal_verb" },
+  ]);
+});
+
+test("skips malformed rows without discarding later valid expressions", () => {
+  const sentence = "She brushed the criticism off and carried on.";
+  assert.deepEqual(expressionsFromPayload({
+    expressions: [
+      null,
+      { encountered_form: "brushed the criticism off", canonical_form: "brush off", reason: "phrasal_verb" },
+      { encountered_form: "carried on", canonical_form: "carry on", reason: "phrasal_verb" },
+    ],
+  }, sentence), [
+    { encounteredForm: "brushed the criticism off", canonicalForm: "brush off", reason: "phrasal_verb" },
+    { encounteredForm: "carried on", canonicalForm: "carry on", reason: "phrasal_verb" },
+  ]);
+});
+
 test("rejects malformed rows and duplicate canonical forms", () => {
   const sentence = "She brushed the criticism off and carried on.";
   assert.deepEqual(expressionsFromPayload({
