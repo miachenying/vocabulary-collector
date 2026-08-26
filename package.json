@@ -16,7 +16,8 @@
     "db:generate": "bash scripts/sites-env.sh -- drizzle-kit generate",
     "test:m3": "node --experimental-strip-types --test tests/vocabulary-m3.test.mjs",
     "eval:m3": "node --experimental-strip-types scripts/run-m3-evals.mjs",
-    "test:m4": "node --experimental-strip-types --test tests/vocabulary-m4.test.mjs"
+    "test:m4": "node --experimental-strip-types --test tests/vocabulary-m4.test.mjs",
+    "score:m4": "node scripts/score-m4-eval-results.mjs evals/m4-sentence-cases.json"
   },
   "dependencies": {
     "drizzle-orm": "0.45.2",
