@@ -37,8 +37,13 @@ export async function createEncounter(input: CreateEncounterInput) {
     sourceUrl = null,
     encounteredAt,
   } = input;
-  const id = crypto.randomUUID();
 
+  const ownedSense = await database.prepare(
+    "SELECT id FROM vocabulary_senses WHERE id = ? AND vocabulary_item_id = ?",
+  ).bind(vocabularySenseId, vocabularyItemId).first<{ id: string }>();
+  if (!ownedSense) throw new Error("Vocabulary sense does not belong to vocabulary item.");
+
+  const id = crypto.randomUUID();
   await database.prepare(`INSERT INTO encounters
     (id, vocabulary_item_id, vocabulary_sense_id, lookup_event_id, encountered_form,
      context_sentence, source_title, source_url, encountered_at, created_at)
