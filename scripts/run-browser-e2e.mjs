@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
+import { once } from "node:events";
 import { chromium } from "playwright";
 
 const baseUrl = "http://127.0.0.1:5173";
@@ -17,19 +18,33 @@ async function waitForServer(timeoutMs = 60_000) {
   throw new Error("Timed out waiting for local Vocabulary Collector server.");
 }
 
-const server = spawn("npm", ["run", "dev"], {
+const server = spawn("./node_modules/.bin/vite", [], {
   stdio: ["ignore", "pipe", "pipe"],
-  env: { ...process.env, GEMINI_API_KEY: "" },
+  env: { ...process.env, GEMINI_API_KEY: "", WRANGLER_LOG_PATH: ".wrangler/wrangler.log" },
 });
 let serverLog = "";
 server.stdout.on("data", (chunk) => { serverLog += chunk; });
 server.stderr.on("data", (chunk) => { serverLog += chunk; });
+
+async function stopServer() {
+  if (server.exitCode !== null) return;
+  server.kill("SIGTERM");
+  const closed = await Promise.race([
+    once(server, "close").then(() => true),
+    new Promise((resolve) => setTimeout(() => resolve(false), 5_000)),
+  ]);
+  if (!closed && server.exitCode === null) {
+    server.kill("SIGKILL");
+    await once(server, "close").catch(() => {});
+  }
+}
 
 let browser;
 try {
   await waitForServer();
   browser = await chromium.launch({ headless: true });
   const page = await browser.newPage();
+  page.setDefaultTimeout(10_000);
   let savedPayload = null;
 
   await page.route("**/api/lookups", async (route) => {
@@ -114,5 +129,5 @@ try {
   throw error;
 } finally {
   if (browser) await browser.close();
-  server.kill("SIGTERM");
+  await stopServer();
 }
