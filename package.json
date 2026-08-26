@@ -20,6 +20,7 @@
     "score:m4": "node scripts/score-m4-eval-results.mjs evals/m4-sentence-cases.json",
     "test:m5": "node --experimental-strip-types --test tests/vocabulary-m5.test.mjs",
     "test:m6": "node --experimental-strip-types --test tests/vocabulary-m6.test.mjs",
+    "test:e2e:d1": "node scripts/run-d1-e2e.mjs",
     "check:release": "npm run test:m3 && npm run test:m4 && npm run test:m5 && npm run test:m6",
     "check:runtime": "npm run check:release && npm test"
   },
