@@ -1,4 +1,4 @@
-import { logExternalAttempt } from "./observability";
+import { logExternalAttempt, type TraceContext } from "./observability";
 import { isRetryableHttpStatus, withRetry } from "./retry";
 
 type GeminiJsonPayload = {
@@ -16,7 +16,11 @@ class GeminiJudgmentHttpError extends Error {
   }
 }
 
-export async function generateLanguageJson(prompt: string, maxOutputTokens = 200) {
+export async function generateLanguageJson(
+  prompt: string,
+  maxOutputTokens = 200,
+  trace?: TraceContext | null,
+) {
   const apiKey = geminiApiKey();
   if (!apiKey) throw new Error("Gemini API key is not configured.");
 
@@ -60,6 +64,7 @@ export async function generateLanguageJson(prompt: string, maxOutputTokens = 200
         outcome: "success",
         durationMs: Date.now() - startedAt,
         status: response.status,
+        trace,
       });
       return parsed;
     } catch (error) {
@@ -75,6 +80,7 @@ export async function generateLanguageJson(prompt: string, maxOutputTokens = 200
         status,
         willRetry,
         errorName: error instanceof Error ? error.name : "UnknownError",
+        trace,
       });
       throw error;
     }
@@ -96,13 +102,14 @@ export async function canonicalizeExpression(
   encounteredForm: string,
   context: string | null,
   fallback: string,
+  trace?: TraceContext | null,
 ) {
   const prompt = `Task: Convert the encountered English expression into a concise reusable dictionary-style canonical form.\n
 Rules:\n- Preserve the same semantic expression, not a broader or different phrase.\n- Normalize inflection, tense, and pronouns/placeholders when useful.\n- For idioms/phrasal expressions, prefer a reusable form such as "win someone over".\n- Do not invent words not needed for the expression.\n- If the input is already canonical, keep it.\n
 Encountered form: ${encounteredForm}\n${context ? `Context: ${context}\n` : ""}Return exactly: {"canonical_form":"..."}`;
 
   try {
-    return canonicalFormFromPayload(await generateLanguageJson(prompt), fallback);
+    return canonicalFormFromPayload(await generateLanguageJson(prompt, 200, trace), fallback);
   } catch (error) {
     console.error("Canonicalization failed; using deterministic fallback", error);
     return fallback;
@@ -132,6 +139,7 @@ export async function matchSemanticSense(
   newMeaning: string,
   context: string | null,
   existingSenses: ExistingSense[],
+  trace?: TraceContext | null,
 ): Promise<SenseMatchDecision> {
   if (existingSenses.length === 0) return { matchType: "new", senseId: null };
 
@@ -142,7 +150,7 @@ Rules:\n- Match semantic sense, not exact wording.\n- Different translations can
 Return exactly one of:\n{"match_type":"existing","sense_id":"<existing id>"}\nor\n{"match_type":"new","sense_id":null}`;
 
   try {
-    return senseMatchFromPayload(await generateLanguageJson(prompt), existingSenses);
+    return senseMatchFromPayload(await generateLanguageJson(prompt, 200, trace), existingSenses);
   } catch (error) {
     console.error("Semantic sense matching failed; conservatively creating a new sense", error);
     return { matchType: "new", senseId: null };
