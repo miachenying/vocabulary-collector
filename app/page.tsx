@@ -20,6 +20,20 @@ type Entry = {
   inputType: "vocabulary" | "sentence";
 };
 
+type SentenceExpression = {
+  encounteredForm: string;
+  canonicalForm: string;
+  reason: "idiom" | "phrasal_verb" | "fixed_expression" | "contextual_expression";
+  chineseMeaning: string | null;
+  meaningStatus: "ready" | "unavailable";
+};
+
+type SentenceAnalysis = {
+  lookupEventId: string | null;
+  translation: string;
+  expressions: SentenceExpression[];
+};
+
 type HistoryResponse = {
   entries: Entry[];
   stats: { newWords: number; repeatedWords: number; totalLookups: number };
@@ -66,6 +80,9 @@ export default function Home() {
   const [detailsOpen, setDetailsOpen] = useState(false);
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState<Entry | null>(null);
+  const [sentenceAnalysis, setSentenceAnalysis] = useState<SentenceAnalysis | null>(null);
+  const [savingCanonical, setSavingCanonical] = useState<string | null>(null);
+  const [savedCanonicalForms, setSavedCanonicalForms] = useState<string[]>([]);
   const [message, setMessage] = useState<string | null>(null);
   const [range, setRange] = useState(today);
   const [history, setHistory] = useState<HistoryResponse>(emptyHistory);
@@ -100,6 +117,9 @@ export default function Home() {
     setLoading(true);
     setMessage(null);
     setResult(null);
+    setSentenceAnalysis(null);
+    setSavedCanonicalForms([]);
+    setSavingCanonical(null);
     try {
       const response = await fetch("/api/lookups", {
         method: "POST",
@@ -109,12 +129,40 @@ export default function Home() {
       const payload = await response.json();
       if (!response.ok && !payload.entry) throw new Error(payload.error || "Lookup failed");
       setResult(payload.entry);
+      setSentenceAnalysis(payload.sentenceAnalysis ?? null);
       if (payload.warning) setMessage(payload.warning);
       setTerm("");
     } catch {
       setMessage("这次查询没有完成。原词会在服务可用后再保存，请重试一次。");
     } finally {
       setLoading(false);
+    }
+  }
+
+  async function saveSentenceExpression(expression: SentenceExpression) {
+    if (!sentenceAnalysis?.lookupEventId || !expression.chineseMeaning || savingCanonical) return;
+    setSavingCanonical(expression.canonicalForm);
+    setMessage(null);
+    try {
+      const response = await fetch("/api/collection", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          lookupEventId: sentenceAnalysis.lookupEventId,
+          encounteredForm: expression.encounteredForm,
+          canonicalForm: expression.canonicalForm,
+          chineseMeaning: expression.chineseMeaning,
+        }),
+      });
+      const payload = await response.json();
+      if (!response.ok) throw new Error(payload.error || "Save failed");
+      setSavedCanonicalForms((current) => current.includes(expression.canonicalForm)
+        ? current
+        : [...current, expression.canonicalForm]);
+    } catch {
+      setMessage("这个表达暂时没有保存成功，请稍后重试。");
+    } finally {
+      setSavingCanonical(null);
     }
   }
 
@@ -211,6 +259,43 @@ export default function Home() {
                 <div><p className="result-term">{result.displayTerm}</p><p className="definition">{result.chineseDefinition || "解释待生成"}</p></div>
                 <span className="count-pill">{result.lookupCount === 1 ? "New" : `${result.lookupCount}× looked up`}</span>
               </article>
+            )}
+
+            {sentenceAnalysis && (
+              <section className="sentence-suggestions" aria-live="polite">
+                <div className="sentence-suggestions-heading">
+                  <div><p>USEFUL EXPRESSIONS</p><h2>值得收下来的表达</h2></div>
+                  <span>{sentenceAnalysis.expressions.length}</span>
+                </div>
+                {sentenceAnalysis.expressions.length === 0 ? (
+                  <p className="sentence-empty">这句话里没有特别值得单独保存的表达。</p>
+                ) : (
+                  <div className="expression-list">
+                    {sentenceAnalysis.expressions.map((expression) => {
+                      const saved = savedCanonicalForms.includes(expression.canonicalForm);
+                      const saving = savingCanonical === expression.canonicalForm;
+                      const meaningReady = expression.meaningStatus === "ready" && Boolean(expression.chineseMeaning);
+                      return (
+                        <article className="expression-card" key={expression.canonicalForm}>
+                          <div>
+                            <strong>{expression.encounteredForm}</strong>
+                            {expression.canonicalForm !== expression.encounteredForm && <small>{expression.canonicalForm}</small>}
+                            <p>{expression.chineseMeaning || "中文意思暂时不可用"}</p>
+                          </div>
+                          <button
+                            type="button"
+                            className={saved ? "save-expression saved" : "save-expression"}
+                            disabled={!meaningReady || saved || Boolean(savingCanonical)}
+                            onClick={() => void saveSentenceExpression(expression)}
+                          >
+                            {saved ? "Saved" : saving ? "Saving…" : meaningReady ? "Save" : "Unavailable"}
+                          </button>
+                        </article>
+                      );
+                    })}
+                  </div>
+                )}
+              </section>
             )}
             {message && <p className="message" role="status">{message}</p>}
           </div>
