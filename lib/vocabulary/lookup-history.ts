@@ -51,6 +51,11 @@ export async function createLookupEventV2(input: CreateLookupEventV2Input) {
     .bind(id, userId).first<LookupEventV2Row>();
 }
 
+export async function findLookupEventV2(database: Db, userId: string, eventId: string) {
+  return database.prepare("SELECT * FROM lookup_events_v2 WHERE id = ? AND user_id = ?")
+    .bind(eventId, userId).first<LookupEventV2Row>();
+}
+
 export async function getLookupHistoryV2(database: Db, userId: string, start: string, end: string) {
   return database.prepare(`SELECT * FROM lookup_events_v2
     WHERE user_id = ? AND looked_up_at >= ? AND looked_up_at <= ?

@@ -131,7 +131,7 @@ export async function POST(request: NextRequest) {
     entry: entry ? mapEntry(entry) : null,
     warning,
     sentenceAnalysis: inputTypeV2 === "sentence" && definition
-      ? { translation: definition, expressions: sentenceExpressions }
+      ? { lookupEventId: v2LookupEventId, translation: definition, expressions: sentenceExpressions }
       : null,
   }, { status: warning ? 202 : 200 });
 }
