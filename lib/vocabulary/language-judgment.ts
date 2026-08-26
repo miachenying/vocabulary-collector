@@ -1,3 +1,6 @@
+import { logExternalAttempt } from "./observability";
+import { isRetryableHttpStatus, withRetry } from "./retry";
+
 type GeminiJsonPayload = {
   candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }>;
 };
@@ -6,39 +9,79 @@ function geminiApiKey() {
   return (globalThis as typeof globalThis & { __GEMINI_API_KEY?: string }).__GEMINI_API_KEY;
 }
 
+class GeminiJudgmentHttpError extends Error {
+  constructor(public status: number) {
+    super(`Gemini judgment request failed (${status}).`);
+    this.name = "GeminiJudgmentHttpError";
+  }
+}
+
 export async function generateLanguageJson(prompt: string, maxOutputTokens = 200) {
   const apiKey = geminiApiKey();
   if (!apiKey) throw new Error("Gemini API key is not configured.");
 
-  const response = await fetch(
-    "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.1-flash-lite:generateContent",
-    {
-      method: "POST",
-      headers: {
-        "content-type": "application/json",
-        "x-goog-api-key": apiKey,
-      },
-      body: JSON.stringify({
-        system_instruction: {
-          parts: [{
-            text: "You perform narrow language-judgment tasks for a vocabulary application. Return only valid JSON matching the requested shape. Do not add markdown or commentary.",
-          }],
+  return withRetry(async ({ attempt, maxAttempts }) => {
+    const startedAt = Date.now();
+    try {
+      const response = await fetch(
+        "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.1-flash-lite:generateContent",
+        {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+            "x-goog-api-key": apiKey,
+          },
+          body: JSON.stringify({
+            system_instruction: {
+              parts: [{
+                text: "You perform narrow language-judgment tasks for a vocabulary application. Return only valid JSON matching the requested shape. Do not add markdown or commentary.",
+              }],
+            },
+            contents: [{ role: "user", parts: [{ text: prompt }] }],
+            generationConfig: {
+              temperature: 0,
+              maxOutputTokens,
+              responseMimeType: "application/json",
+            },
+          }),
         },
-        contents: [{ role: "user", parts: [{ text: prompt }] }],
-        generationConfig: {
-          temperature: 0,
-          maxOutputTokens,
-          responseMimeType: "application/json",
-        },
-      }),
-    },
-  );
+      );
 
-  if (!response.ok) throw new Error(`Gemini judgment request failed (${response.status}).`);
-  const payload = await response.json() as GeminiJsonPayload;
-  const text = payload.candidates?.[0]?.content?.parts?.map((part) => part.text || "").join("").trim();
-  if (!text) throw new Error("Gemini returned an empty language judgment.");
-  return JSON.parse(text) as unknown;
+      if (!response.ok) throw new GeminiJudgmentHttpError(response.status);
+      const payload = await response.json() as GeminiJsonPayload;
+      const text = payload.candidates?.[0]?.content?.parts?.map((part) => part.text || "").join("").trim();
+      if (!text) throw new Error("Gemini returned an empty language judgment.");
+      const parsed = JSON.parse(text) as unknown;
+      logExternalAttempt({
+        provider: "gemini",
+        operation: "language_judgment",
+        attempt,
+        maxAttempts,
+        outcome: "success",
+        durationMs: Date.now() - startedAt,
+        status: response.status,
+      });
+      return parsed;
+    } catch (error) {
+      const status = error instanceof GeminiJudgmentHttpError ? error.status : null;
+      const willRetry = attempt < maxAttempts && (status === null || isRetryableHttpStatus(status));
+      logExternalAttempt({
+        provider: "gemini",
+        operation: "language_judgment",
+        attempt,
+        maxAttempts,
+        outcome: "failure",
+        durationMs: Date.now() - startedAt,
+        status,
+        willRetry,
+        errorName: error instanceof Error ? error.name : "UnknownError",
+      });
+      throw error;
+    }
+  }, {
+    maxAttempts: 2,
+    shouldRetry: (error) => !(error instanceof GeminiJudgmentHttpError) || isRetryableHttpStatus(error.status),
+  });
 }
 
 export function canonicalFormFromPayload(payload: unknown, fallback: string) {
