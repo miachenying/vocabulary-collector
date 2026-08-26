@@ -1,36 +1,78 @@
 import type { DictionaryLookup } from "./dictionary";
+import { logExternalAttempt } from "./observability";
+import { isRetryableHttpStatus, withRetry } from "./retry";
 
 function geminiApiKey() {
   return (globalThis as typeof globalThis & { __GEMINI_API_KEY?: string }).__GEMINI_API_KEY;
+}
+
+class GeminiHttpError extends Error {
+  constructor(public status: number) {
+    super(`Gemini request failed (${status}).`);
+    this.name = "GeminiHttpError";
+  }
 }
 
 async function callGemini(prompt: string, systemInstruction: string, maxOutputTokens = 300) {
   const apiKey = geminiApiKey();
   if (!apiKey) throw new Error("Gemini API key is not configured.");
 
-  const response = await fetch(
-    "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.1-flash-lite:generateContent",
-    {
-      method: "POST",
-      headers: {
-        "content-type": "application/json",
-        "x-goog-api-key": apiKey,
-      },
-      body: JSON.stringify({
-        system_instruction: { parts: [{ text: systemInstruction }] },
-        contents: [{ role: "user", parts: [{ text: prompt }] }],
-        generationConfig: { temperature: 0.1, maxOutputTokens },
-      }),
-    },
-  );
+  return withRetry(async ({ attempt, maxAttempts }) => {
+    const startedAt = Date.now();
+    try {
+      const response = await fetch(
+        "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.1-flash-lite:generateContent",
+        {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+            "x-goog-api-key": apiKey,
+          },
+          body: JSON.stringify({
+            system_instruction: { parts: [{ text: systemInstruction }] },
+            contents: [{ role: "user", parts: [{ text: prompt }] }],
+            generationConfig: { temperature: 0.1, maxOutputTokens },
+          }),
+        },
+      );
 
-  if (!response.ok) throw new Error(`Gemini request failed (${response.status}).`);
-  const payload = await response.json() as {
-    candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }>;
-  };
-  const text = payload.candidates?.[0]?.content?.parts?.map((part) => part.text || "").join("").trim();
-  if (!text) throw new Error("Gemini returned an empty result.");
-  return text;
+      if (!response.ok) throw new GeminiHttpError(response.status);
+      const payload = await response.json() as {
+        candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }>;
+      };
+      const text = payload.candidates?.[0]?.content?.parts?.map((part) => part.text || "").join("").trim();
+      if (!text) throw new Error("Gemini returned an empty result.");
+
+      logExternalAttempt({
+        provider: "gemini",
+        operation: "generate_text",
+        attempt,
+        maxAttempts,
+        outcome: "success",
+        durationMs: Date.now() - startedAt,
+        status: response.status,
+      });
+      return text;
+    } catch (error) {
+      const status = error instanceof GeminiHttpError ? error.status : null;
+      const willRetry = attempt < maxAttempts && (status === null || isRetryableHttpStatus(status));
+      logExternalAttempt({
+        provider: "gemini",
+        operation: "generate_text",
+        attempt,
+        maxAttempts,
+        outcome: "failure",
+        durationMs: Date.now() - startedAt,
+        status,
+        willRetry,
+        errorName: error instanceof Error ? error.name : "UnknownError",
+      });
+      throw error;
+    }
+  }, {
+    maxAttempts: 2,
+    shouldRetry: (error) => !(error instanceof GeminiHttpError) || isRetryableHttpStatus(error.status),
+  });
 }
 
 export async function generateChineseDefinition(term: string, context: string | null) {
