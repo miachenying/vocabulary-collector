@@ -37,10 +37,13 @@ export async function findOrCreateVocabularyItem(input: FindOrCreateVocabularyIt
   if (existing) return existing;
 
   const id = crypto.randomUUID();
-  await database.prepare(`INSERT INTO vocabulary_items
+  await database.prepare(`INSERT OR IGNORE INTO vocabulary_items
     (id, user_id, canonical_form, item_type, created_at, updated_at)
     VALUES (?, ?, ?, ?, ?, ?)`)
     .bind(id, userId, canonicalForm, itemType, now, now).run();
 
-  return findVocabularyItemById(database, userId, id);
+  // Re-read by the unique business key instead of the generated id. If two
+  // concurrent requests raced, one insert may be ignored and both callers
+  // should converge on the same stored item.
+  return findVocabularyItem(database, userId, canonicalForm);
 }
