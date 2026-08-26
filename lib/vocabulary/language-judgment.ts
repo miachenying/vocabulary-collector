@@ -10,9 +10,12 @@ function geminiApiKey() {
 }
 
 class GeminiJudgmentHttpError extends Error {
-  constructor(public status: number) {
+  status: number;
+
+  constructor(status: number) {
     super(`Gemini judgment request failed (${status}).`);
     this.name = "GeminiJudgmentHttpError";
+    this.status = status;
   }
 }
 
