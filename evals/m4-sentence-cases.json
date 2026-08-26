@@ -1,0 +1,37 @@
+[
+  {
+    "id": "m4-01",
+    "sentence": "The proposal was met with skepticism, but she addressed the concerns head-on and eventually won them over.",
+    "must_include": ["be met with skepticism", "win someone over", "head-on"],
+    "must_exclude": ["proposal", "manage", "address concerns"],
+    "max_expressions": 3
+  },
+  {
+    "id": "m4-02",
+    "sentence": "She brushed the criticism off and carried on as if nothing had happened.",
+    "must_include": ["brush off", "carry on"],
+    "must_exclude": [],
+    "max_expressions": 3
+  },
+  {
+    "id": "m4-03",
+    "sentence": "The announcement caught everyone off guard and sent shock waves through the industry.",
+    "must_include": ["catch someone off guard", "send shock waves through"],
+    "must_exclude": [],
+    "max_expressions": 3
+  },
+  {
+    "id": "m4-04",
+    "sentence": "I submitted the report and emailed my manager.",
+    "must_include": [],
+    "must_exclude": [],
+    "max_expressions": 0
+  },
+  {
+    "id": "m4-05",
+    "sentence": "Her explanation doesn't quite add up.",
+    "must_include": ["add up"],
+    "must_exclude": [],
+    "max_expressions": 1
+  }
+]

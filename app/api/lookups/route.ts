@@ -1,236 +1,212 @@
 import { NextRequest, NextResponse } from "next/server";
+import { completeV2Lookup, failV2Lookup, startV2Lookup } from "@/lib/vocabulary/compatibility";
+import { ensureVocabularySchema, getVocabularyDb } from "@/lib/vocabulary/database";
+import { findEntry, findEntryById, mapEntry, updateChineseDefinition, upsertLookupEntry } from "@/lib/vocabulary/entries";
+import { createLookupEvent, deleteLookupEvent, getHistory } from "@/lib/vocabulary/history";
+import { classifyInputV2, normalizeTerm, nullableString } from "@/lib/vocabulary/input";
+import { canonicalizeExpression } from "@/lib/vocabulary/language-judgment";
+import { getVocabularyMeaning } from "@/lib/vocabulary/meaning-provider";
+import { logRequestStage, type TraceContext } from "@/lib/vocabulary/observability";
+import { enrichSentenceExpressions, extractSentenceExpressions, type EnrichedSentenceExpression } from "@/lib/vocabulary/sentence-pipeline";
 
 export const dynamic = "force-dynamic";
-
-type Db = {
-  prepare(sql: string): {
-    bind(...values: unknown[]): { run(): Promise<unknown>; first<T>(): Promise<T | null>; all<T>(): Promise<{ results: T[] }> };
-    run(): Promise<unknown>;
-  };
-  batch(statements: unknown[]): Promise<unknown>;
-};
-
-const db = () => {
-  const binding = (globalThis as typeof globalThis & { __VOCAB_DB?: Db }).__VOCAB_DB;
-  if (!binding) throw new Error("Vocabulary database binding is unavailable.");
-  return binding;
-};
-
-const createEntries = `CREATE TABLE IF NOT EXISTS vocabulary_entries (
-  id TEXT PRIMARY KEY, user_id TEXT NOT NULL, normalized_term TEXT NOT NULL, display_term TEXT NOT NULL,
-  language TEXT NOT NULL DEFAULT 'English', chinese_definition TEXT, part_of_speech TEXT,
-  context_sentence TEXT, source_title TEXT, source_url TEXT, note TEXT, lookup_count INTEGER NOT NULL DEFAULT 1,
-  first_looked_up_at TEXT NOT NULL, last_looked_up_at TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
-  UNIQUE(user_id, normalized_term)
-)`;
-const createEvents = `CREATE TABLE IF NOT EXISTS lookup_events (
-  id TEXT PRIMARY KEY, entry_id TEXT NOT NULL, user_id TEXT NOT NULL, looked_up_at TEXT NOT NULL,
-  context_sentence TEXT, source_title TEXT, source_url TEXT
-)`;
-let initialized = false;
-
-async function ensureSchema() {
-  if (initialized) return;
-  const database = db();
-  await database.batch([
-    database.prepare(createEntries),
-    database.prepare(createEvents),
-    database.prepare("CREATE INDEX IF NOT EXISTS event_user_time_idx ON lookup_events(user_id, looked_up_at)"),
-    database.prepare("CREATE INDEX IF NOT EXISTS event_entry_time_idx ON lookup_events(entry_id, looked_up_at)"),
-    database.prepare("CREATE INDEX IF NOT EXISTS entry_user_last_lookup_idx ON vocabulary_entries(user_id, last_looked_up_at)"),
-  ]);
-  initialized = true;
-}
-
-function normalizeTerm(input: string) {
-  return input.trim().toLocaleLowerCase("en-US").replace(/[“”]/g, '"').replace(/[‘’]/g, "'").replace(/\s+/g, " ").replace(/[.,!?;:]+$/g, "");
-}
-
-function inputType(input: string) {
-  const trimmed = input.trim();
-  const wordCount = trimmed.split(/\s+/).filter(Boolean).length;
-  return /[.!?;]\s*$/.test(trimmed) || wordCount >= 6 ? "sentence" : "vocabulary";
-}
 
 function userId(request: NextRequest) {
   return request.headers.get("oai-authenticated-user-email") || "mia-local";
 }
 
-function nullable(value: unknown) {
-  if (typeof value !== "string") return null;
-  const trimmed = value.trim();
-  return trimmed || null;
-}
-
-function geminiApiKey() {
-  return (globalThis as typeof globalThis & { __GEMINI_API_KEY?: string }).__GEMINI_API_KEY;
-}
-
-async function generateChineseDefinition(term: string, context: string | null) {
-  const apiKey = geminiApiKey();
-  if (!apiKey) throw new Error("Gemini API key is not configured.");
-
-  const isSingleWord = !/\s/.test(term.trim());
-  const task = isSingleWord
-    ? "Define the English word in concise, natural Simplified Chinese."
-    : "Translate the ENTIRE English input into natural Simplified Chinese. Preserve every clause and idea in the input. Do not extract or define only selected vocabulary words.";
-  const prompt = context
-    ? `Task: ${task}\nEnglish input: ${term}\nOriginal context: ${context}`
-    : `Task: ${task}\nEnglish input: ${term}`;
-
-  const response = await fetch(
-    "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.1-flash-lite:generateContent",
-    {
-      method: "POST",
-      headers: {
-        "content-type": "application/json",
-        "x-goog-api-key": apiKey,
-      },
-      body: JSON.stringify({
-        system_instruction: {
-          parts: [{
-            text: "You are the translation engine for a personal English vocabulary collector. Obey the explicit Task in the user message. For any multi-word English input, translate the complete input, including every clause and idea; never answer with definitions of selected words. For a single English word, give its concise most common Simplified Chinese meaning(s), using original context when provided. Reply with only the Chinese result. Do not use markdown, bullets, examples, commentary, or repeat the English input.",
-          }],
-        },
-        contents: [{ role: "user", parts: [{ text: prompt }] }],
-        generationConfig: {
-          temperature: 0.1,
-          maxOutputTokens: 300,
-        },
-      }),
-    },
-  );
-
-  if (!response.ok) throw new Error(`Gemini request failed (${response.status}).`);
-  const payload = await response.json() as {
-    candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }>;
-  };
-  const definition = payload.candidates?.[0]?.content?.parts?.map((part) => part.text || "").join("").trim();
-  if (!definition) throw new Error("Gemini returned an empty definition.");
-  return definition;
-}
-
-function mapEntry(row: Record<string, unknown>) {
-  return {
-    id: row.id, displayTerm: row.display_term, chineseDefinition: row.chinese_definition,
-    contextSentence: row.context_sentence, sourceTitle: row.source_title, sourceUrl: row.source_url, note: row.note,
-    lookupCount: row.lookup_count, firstLookedUpAt: row.first_looked_up_at, lastLookedUpAt: row.last_looked_up_at,
-    periodLookupCount: row.period_lookup_count ?? row.lookup_count,
-    periodFirstLookup: row.period_first_lookup ?? row.first_looked_up_at,
-    periodLastLookup: row.period_last_lookup ?? row.last_looked_up_at,
-    lastEventId: row.last_event_id ?? null,
-    inputType: inputType(String(row.display_term || "")),
-  };
+function jsonWithTrace(body: unknown, status: number, trace: TraceContext) {
+  return NextResponse.json(body, { status, headers: { "x-request-id": trace.requestId } });
 }
 
 export async function POST(request: NextRequest) {
-  await ensureSchema();
-  const body = await request.json().catch(() => null) as Record<string, unknown> | null;
-  const displayTerm = nullable(body?.term);
-  if (!displayTerm) return NextResponse.json({ error: "Please enter a word, phrase, or sentence." }, { status: 400 });
-  const normalized = normalizeTerm(displayTerm);
-  if (!normalized) return NextResponse.json({ error: "Please enter a word, phrase, or sentence." }, { status: 400 });
+  const trace: TraceContext = { requestId: crypto.randomUUID(), flow: "lookup" };
+  const requestStartedAt = Date.now();
+  logRequestStage({ trace, stage: "request", outcome: "start" });
 
-  const database = db();
+  await ensureVocabularySchema();
+  const body = await request.json().catch(() => null) as Record<string, unknown> | null;
+  const displayTerm = nullableString(body?.term);
+  if (!displayTerm) {
+    logRequestStage({ trace, stage: "input_validation", outcome: "failure", errorName: "MissingInput" });
+    return jsonWithTrace({ error: "Please enter a word, phrase, or sentence.", requestId: trace.requestId }, 400, trace);
+  }
+  const normalized = normalizeTerm(displayTerm);
+  if (!normalized) {
+    logRequestStage({ trace, stage: "input_validation", outcome: "failure", errorName: "EmptyNormalizedInput" });
+    return jsonWithTrace({ error: "Please enter a word, phrase, or sentence.", requestId: trace.requestId }, 400, trace);
+  }
+
+  const database = getVocabularyDb();
   const uid = userId(request);
   const now = new Date().toISOString();
-  const context = nullable(body?.context);
-  const sourceTitle = nullable(body?.sourceTitle);
-  const sourceUrl = nullable(body?.sourceUrl);
-  const note = nullable(body?.note);
-  const existing = await database.prepare("SELECT * FROM vocabulary_entries WHERE user_id = ? AND normalized_term = ?").bind(uid, normalized).first<Record<string, unknown>>();
+  const context = nullableString(body?.context);
+  const sourceTitle = nullableString(body?.sourceTitle);
+  const sourceUrl = nullableString(body?.sourceUrl);
+  const note = nullableString(body?.note);
+  const inputTypeV2 = classifyInputV2(displayTerm);
+  logRequestStage({ trace, stage: "classification", outcome: "success", inputType: inputTypeV2 });
+
+  let v2LookupEventId: string | null = null;
+  try {
+    v2LookupEventId = await startV2Lookup({
+      database,
+      userId: uid,
+      rawInput: displayTerm,
+      inputType: inputTypeV2,
+      contextSentence: context,
+      sourceTitle,
+      sourceUrl,
+      lookedUpAt: now,
+    });
+    logRequestStage({ trace, stage: "lookup_history_start", outcome: "success", inputType: inputTypeV2 });
+  } catch (error) {
+    console.error("Failed to start v2 lookup mirror", error);
+    logRequestStage({ trace, stage: "lookup_history_start", outcome: "partial", inputType: inputTypeV2, errorName: error instanceof Error ? error.name : "UnknownError" });
+  }
+
+  const existing = await findEntry(database, uid, normalized);
   const entryId = existing?.id as string | undefined ?? crypto.randomUUID();
 
-  if (existing) {
-    await database.prepare(`UPDATE vocabulary_entries SET display_term = ?, context_sentence = COALESCE(?, context_sentence),
-      source_title = COALESCE(?, source_title), source_url = COALESCE(?, source_url), note = COALESCE(?, note),
-      lookup_count = lookup_count + 1, last_looked_up_at = ?, updated_at = ? WHERE id = ?`)
-      .bind(displayTerm, context, sourceTitle, sourceUrl, note, now, now, entryId).run();
-  } else {
-    await database.prepare(`INSERT INTO vocabulary_entries
-      (id, user_id, normalized_term, display_term, context_sentence, source_title, source_url, note, lookup_count, first_looked_up_at, last_looked_up_at, created_at, updated_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?)`)
-      .bind(entryId, uid, normalized, displayTerm, context, sourceTitle, sourceUrl, note, now, now, now, now).run();
-  }
-  await database.prepare(`INSERT INTO lookup_events (id, entry_id, user_id, looked_up_at, context_sentence, source_title, source_url)
-    VALUES (?, ?, ?, ?, ?, ?, ?)`)
-    .bind(crypto.randomUUID(), entryId, uid, now, context, sourceTitle, sourceUrl).run();
+  await upsertLookupEntry({
+    database,
+    existing,
+    entryId,
+    userId: uid,
+    normalizedTerm: normalized,
+    displayTerm,
+    context,
+    sourceTitle,
+    sourceUrl,
+    note,
+    now,
+  });
+
+  await createLookupEvent({
+    database,
+    entryId,
+    userId: uid,
+    lookedUpAt: now,
+    context,
+    sourceTitle,
+    sourceUrl,
+  });
+  logRequestStage({ trace, stage: "legacy_persist", outcome: "success", inputType: inputTypeV2 });
 
   let warning: string | null = null;
   let definition = existing?.chinese_definition as string | null | undefined;
-  // Multi-word inputs are always regenerated. This both makes sentence
-  // translation deterministic and repairs any older cached entry that was
-  // mistakenly stored as a single-word definition.
+  let sentenceExpressions: EnrichedSentenceExpression[] = [];
+  let sentenceAnalysisDegraded = false;
   const isMultiWord = /\s/.test(displayTerm.trim());
   if (!definition || context || isMultiWord) {
+    const meaningStartedAt = Date.now();
     try {
-      definition = await generateChineseDefinition(displayTerm, context);
-      await database.prepare("UPDATE vocabulary_entries SET chinese_definition = ?, updated_at = ? WHERE id = ?")
-        .bind(definition, new Date().toISOString(), entryId).run();
-    } catch {
+      const meaning = await getVocabularyMeaning(displayTerm, inputTypeV2, context, trace);
+      definition = meaning.chineseMeaning;
+      await updateChineseDefinition(database, entryId, definition);
+      logRequestStage({ trace, stage: "meaning", outcome: "success", durationMs: Date.now() - meaningStartedAt, inputType: inputTypeV2, provider: meaning.provider });
+    } catch (error) {
+      console.error("Meaning provider failed", error);
       warning = "词已经保存，但这次中文解释暂时没有生成。请稍后再查一次。";
+      logRequestStage({ trace, stage: "meaning", outcome: "failure", durationMs: Date.now() - meaningStartedAt, inputType: inputTypeV2, errorName: error instanceof Error ? error.name : "UnknownError" });
+    }
+  } else {
+    logRequestStage({ trace, stage: "meaning", outcome: "success", inputType: inputTypeV2, provider: "stored" });
+  }
+
+  if (inputTypeV2 === "sentence" && definition && !warning) {
+    const sentenceStartedAt = Date.now();
+    const extraction = await extractSentenceExpressions(displayTerm, trace);
+    sentenceExpressions = await enrichSentenceExpressions(displayTerm, extraction.expressions, trace);
+    sentenceAnalysisDegraded = extraction.status === "failed"
+      || sentenceExpressions.some((expression) => expression.meaningStatus === "unavailable");
+    logRequestStage({
+      trace,
+      stage: "sentence_analysis",
+      outcome: sentenceAnalysisDegraded ? "partial" : "success",
+      durationMs: Date.now() - sentenceStartedAt,
+      inputType: inputTypeV2,
+    });
+  }
+
+  if (v2LookupEventId) {
+    if (definition && !warning) {
+      try {
+        const canonicalForm = inputTypeV2 === "phrase"
+          ? await canonicalizeExpression(displayTerm, context, normalized, trace)
+          : normalized;
+
+        await completeV2Lookup({
+          database,
+          userId: uid,
+          rawInput: displayTerm,
+          inputType: inputTypeV2,
+          contextSentence: context,
+          sourceTitle,
+          sourceUrl,
+          lookedUpAt: now,
+          lookupEventId: v2LookupEventId,
+          canonicalForm,
+          chineseMeaning: definition,
+        });
+        logRequestStage({ trace, stage: "v2_persist", outcome: "success", inputType: inputTypeV2 });
+      } catch (error) {
+        console.error("Failed to complete v2 lookup mirror", error);
+        logRequestStage({ trace, stage: "v2_persist", outcome: "partial", inputType: inputTypeV2, errorName: error instanceof Error ? error.name : "UnknownError" });
+      }
+    } else {
+      try {
+        await failV2Lookup(database, uid, v2LookupEventId);
+        logRequestStage({ trace, stage: "v2_persist", outcome: "partial", inputType: inputTypeV2 });
+      } catch (error) {
+        console.error("Failed to mark v2 lookup mirror as failed", error);
+        logRequestStage({ trace, stage: "v2_persist", outcome: "failure", inputType: inputTypeV2, errorName: error instanceof Error ? error.name : "UnknownError" });
+      }
     }
   }
 
-  const entry = await database.prepare("SELECT * FROM vocabulary_entries WHERE id = ?").bind(entryId).first<Record<string, unknown>>();
-  return NextResponse.json({
+  const entry = await findEntryById(database, entryId);
+  const requestPartial = Boolean(warning) || sentenceAnalysisDegraded;
+  const status = warning ? 202 : 200;
+  logRequestStage({ trace, stage: "request", outcome: requestPartial ? "partial" : "success", durationMs: Date.now() - requestStartedAt, inputType: inputTypeV2 });
+  return jsonWithTrace({
     entry: entry ? mapEntry(entry) : null,
     warning,
-  }, { status: warning ? 202 : 200 });
+    requestId: trace.requestId,
+    sentenceAnalysis: inputTypeV2 === "sentence" && definition
+      ? { lookupEventId: v2LookupEventId, translation: definition, expressions: sentenceExpressions }
+      : null,
+  }, status, trace);
 }
 
 export async function GET(request: NextRequest) {
-  await ensureSchema();
+  await ensureVocabularySchema();
   const start = request.nextUrl.searchParams.get("start");
   const end = request.nextUrl.searchParams.get("end");
   if (!start || !end || Number.isNaN(Date.parse(start)) || Number.isNaN(Date.parse(end))) {
     return NextResponse.json({ error: "Valid start and end dates are required." }, { status: 400 });
   }
+
   const uid = userId(request);
-  const database = db();
-  const rows = await database.prepare(`SELECT e.*, COUNT(ev.id) AS period_lookup_count,
-      MIN(ev.looked_up_at) AS period_first_lookup,
-      MAX(ev.looked_up_at) AS period_last_lookup,
-      (SELECT ev2.id FROM lookup_events ev2 WHERE ev2.entry_id = e.id AND ev2.user_id = ?
-       AND ev2.looked_up_at >= ? AND ev2.looked_up_at <= ? ORDER BY ev2.looked_up_at DESC LIMIT 1) AS last_event_id
-    FROM vocabulary_entries e JOIN lookup_events ev ON ev.entry_id = e.id
-    WHERE ev.user_id = ? AND ev.looked_up_at >= ? AND ev.looked_up_at <= ?
-    GROUP BY e.id ORDER BY period_lookup_count DESC, MAX(ev.looked_up_at) DESC`)
-    .bind(uid, start, end, uid, start, end).all<Record<string, unknown>>();
+  const database = getVocabularyDb();
+  const rows = await getHistory(database, uid, start, end);
   const totalLookups = rows.results.reduce((sum, row) => sum + Number(row.period_lookup_count || 0), 0);
   const repeatedWords = rows.results.filter((row) => Number(row.period_lookup_count) > 1).length;
   const newWords = rows.results.filter((row) => {
     const first = String(row.first_looked_up_at);
     return first >= start && first <= end;
   }).length;
+
   return NextResponse.json({ entries: rows.results.map(mapEntry), stats: { newWords, repeatedWords, totalLookups } });
 }
 
 export async function DELETE(request: NextRequest) {
-  await ensureSchema();
+  await ensureVocabularySchema();
   const body = await request.json().catch(() => null) as Record<string, unknown> | null;
-  const eventId = nullable(body?.eventId);
+  const eventId = nullableString(body?.eventId);
   if (!eventId) return NextResponse.json({ error: "A history record is required." }, { status: 400 });
 
-  const uid = userId(request);
-  const database = db();
-  const event = await database.prepare("SELECT id, entry_id FROM lookup_events WHERE id = ? AND user_id = ?")
-    .bind(eventId, uid).first<{ id: string; entry_id: string }>();
-  if (!event) return NextResponse.json({ error: "History record not found." }, { status: 404 });
-
-  await database.prepare("DELETE FROM lookup_events WHERE id = ? AND user_id = ?").bind(eventId, uid).run();
-  const remaining = await database.prepare(`SELECT COUNT(*) AS count, MIN(looked_up_at) AS first_lookup, MAX(looked_up_at) AS last_lookup
-    FROM lookup_events WHERE entry_id = ? AND user_id = ?`).bind(event.entry_id, uid)
-    .first<{ count: number; first_lookup: string | null; last_lookup: string | null }>();
-
-  const count = Number(remaining?.count || 0);
-  if (count === 0) {
-    await database.prepare("DELETE FROM vocabulary_entries WHERE id = ? AND user_id = ?").bind(event.entry_id, uid).run();
-  } else {
-    const now = new Date().toISOString();
-    await database.prepare(`UPDATE vocabulary_entries SET lookup_count = ?, first_looked_up_at = ?, last_looked_up_at = ?, updated_at = ?
-      WHERE id = ? AND user_id = ?`).bind(count, remaining?.first_lookup, remaining?.last_lookup, now, event.entry_id, uid).run();
-  }
-
+  const deleted = await deleteLookupEvent(getVocabularyDb(), userId(request), eventId);
+  if (!deleted) return NextResponse.json({ error: "History record not found." }, { status: 404 });
   return NextResponse.json({ deleted: true });
 }

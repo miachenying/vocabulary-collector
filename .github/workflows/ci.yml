@@ -1,0 +1,100 @@
+name: Vocabulary Collector CI
+
+on:
+  push:
+    branches: [v2-dev, main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  deterministic-regression:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - name: Install locked dependencies
+        run: npm ci
+      - name: Run deterministic release gate
+        run: npm run check:release
+
+  runtime-build:
+    needs: deterministic-regression
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - name: Install locked dependencies
+        run: npm ci
+      - name: Build and run rendered HTML regression
+        run: npm test
+
+  d1-e2e:
+    needs: runtime-build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - name: Install locked dependencies
+        run: npm ci
+      - name: Build production Worker bundle
+        run: npm run build
+      - name: Run real local D1 manual-save E2E
+        run: npm run test:e2e:d1
+
+  browser-e2e:
+    needs: d1-e2e
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - name: Install locked dependencies
+        run: npm ci
+      - name: Install Chromium for Playwright
+        run: npx playwright install --with-deps chromium
+      - name: Run browser manual-save E2E
+        run: npm run test:e2e:browser
+
+  semantic-eval:
+    needs: browser-e2e
+    runs-on: ubuntu-latest
+    env:
+      GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - name: Check semantic eval configuration
+        id: semantic-config
+        shell: bash
+        run: |
+          if [ -z "$GEMINI_API_KEY" ]; then
+            echo "configured=false" >> "$GITHUB_OUTPUT"
+            echo "SEMANTIC_EVAL_NOT_RUN: GEMINI_API_KEY secret is not configured."
+          else
+            echo "configured=true" >> "$GITHUB_OUTPUT"
+            echo "Live semantic eval is configured."
+          fi
+      - name: Install locked dependencies
+        if: steps.semantic-config.outputs.configured == 'true'
+        run: npm ci
+      - name: Run live Dictionary/Gemini semantic eval
+        if: steps.semantic-config.outputs.configured == 'true'
+        run: npm run eval:live
