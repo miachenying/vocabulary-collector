@@ -3,6 +3,7 @@ import { findOrCreateVocabularyItem } from "./items";
 import { matchSemanticSense } from "./language-judgment";
 import { findLookupEventV2 } from "./lookup-history";
 import { expressionAppearsInSentence, type ManualSentenceSaveInput } from "./manual-save-input";
+import type { TraceContext } from "./observability";
 import { createVocabularySense, findVocabularySense, listVocabularySenses } from "./senses";
 import type { Db } from "./database";
 
@@ -15,8 +16,9 @@ export async function saveSentenceSuggestion(input: {
   userId: string;
   suggestion: ManualSentenceSaveInput;
   now: string;
+  trace?: TraceContext | null;
 }) {
-  const { database, userId, suggestion, now } = input;
+  const { database, userId, suggestion, now, trace } = input;
   const event = await findLookupEventV2(database, userId, suggestion.lookupEventId);
   if (!event || event.input_type !== "sentence") throw new Error("Sentence lookup event not found.");
   if (!expressionAppearsInSentence(suggestion.encounteredForm, event.raw_input)) {
@@ -41,6 +43,7 @@ export async function saveSentenceSuggestion(input: {
       suggestion.chineseMeaning,
       event.raw_input,
       senses.results.map((candidate) => ({ id: candidate.id, chineseMeaning: candidate.chinese_meaning })),
+      trace,
     );
     if (decision.matchType === "existing") {
       sense = await findVocabularySense(database, item.id, decision.senseId);
