@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { buildExternalAttemptEvent, buildRequestStageEvent } from "../lib/vocabulary/observability.ts";
 import { isRetryableHttpStatus, withRetry } from "../lib/vocabulary/retry.ts";
 
 test("returns immediately when the first attempt succeeds", async () => {
@@ -49,4 +50,31 @@ test("HTTP retry policy retries 429 and 5xx but not ordinary 4xx", () => {
   assert.equal(isRetryableHttpStatus(503), true);
   assert.equal(isRetryableHttpStatus(400), false);
   assert.equal(isRetryableHttpStatus(404), false);
+});
+
+test("request-stage events preserve one request id across stages without user content", () => {
+  const trace = { requestId: "req-123", flow: "lookup" };
+  const event = buildRequestStageEvent({ trace, stage: "meaning", outcome: "success", inputType: "sentence", provider: "gemini", durationMs: 12.8 });
+  assert.equal(event.request_id, "req-123");
+  assert.equal(event.flow, "lookup");
+  assert.equal(event.stage, "meaning");
+  assert.equal(event.duration_ms, 13);
+  assert.equal("raw_input" in event, false);
+  assert.equal("sentence" in event, false);
+});
+
+test("external-call events carry the request trace id", () => {
+  const event = buildExternalAttemptEvent({
+    provider: "gemini",
+    operation: "generate_text",
+    attempt: 2,
+    maxAttempts: 2,
+    outcome: "success",
+    durationMs: 50,
+    status: 200,
+    trace: { requestId: "req-456", flow: "lookup" },
+  });
+  assert.equal(event.request_id, "req-456");
+  assert.equal(event.flow, "lookup");
+  assert.equal(event.attempt, 2);
 });
