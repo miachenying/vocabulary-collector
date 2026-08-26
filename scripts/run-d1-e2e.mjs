@@ -7,7 +7,7 @@ const userId = "e2e@example.com";
 const miniflare = new Miniflare({
   modules: true,
   script: "export default { async fetch() { return new Response('ok'); } }",
-  compatibilityDate: "2026-08-01",
+  compatibilityDate: "2026-05-22",
   d1Databases: ["DB"],
 });
 
