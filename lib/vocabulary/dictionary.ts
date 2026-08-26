@@ -1,4 +1,4 @@
-import { logExternalAttempt } from "./observability";
+import { logExternalAttempt, type TraceContext } from "./observability";
 import { isRetryableHttpStatus, withRetry } from "./retry";
 
 export type DictionarySense = {
@@ -32,7 +32,7 @@ class DictionaryHttpError extends Error {
   }
 }
 
-export async function lookupEnglishWord(word: string): Promise<DictionaryLookup | null> {
+export async function lookupEnglishWord(word: string, trace?: TraceContext | null): Promise<DictionaryLookup | null> {
   return withRetry(async ({ attempt, maxAttempts }) => {
     const startedAt = Date.now();
     try {
@@ -46,6 +46,7 @@ export async function lookupEnglishWord(word: string): Promise<DictionaryLookup 
           outcome: "success",
           durationMs: Date.now() - startedAt,
           status: 404,
+          trace,
         });
         return null;
       }
@@ -74,6 +75,7 @@ export async function lookupEnglishWord(word: string): Promise<DictionaryLookup 
         outcome: "success",
         durationMs: Date.now() - startedAt,
         status: response.status,
+        trace,
       });
 
       if (senses.length === 0) return null;
@@ -95,6 +97,7 @@ export async function lookupEnglishWord(word: string): Promise<DictionaryLookup 
         status,
         willRetry,
         errorName: error instanceof Error ? error.name : "UnknownError",
+        trace,
       });
       throw error;
     }
