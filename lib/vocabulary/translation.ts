@@ -1,5 +1,5 @@
 import type { DictionaryLookup } from "./dictionary";
-import { logExternalAttempt } from "./observability";
+import { logExternalAttempt, type TraceContext } from "./observability";
 import { isRetryableHttpStatus, withRetry } from "./retry";
 
 function geminiApiKey() {
@@ -13,7 +13,12 @@ class GeminiHttpError extends Error {
   }
 }
 
-async function callGemini(prompt: string, systemInstruction: string, maxOutputTokens = 300) {
+async function callGemini(
+  prompt: string,
+  systemInstruction: string,
+  maxOutputTokens = 300,
+  trace?: TraceContext | null,
+) {
   const apiKey = geminiApiKey();
   if (!apiKey) throw new Error("Gemini API key is not configured.");
 
@@ -51,6 +56,7 @@ async function callGemini(prompt: string, systemInstruction: string, maxOutputTo
         outcome: "success",
         durationMs: Date.now() - startedAt,
         status: response.status,
+        trace,
       });
       return text;
     } catch (error) {
@@ -66,6 +72,7 @@ async function callGemini(prompt: string, systemInstruction: string, maxOutputTo
         status,
         willRetry,
         errorName: error instanceof Error ? error.name : "UnknownError",
+        trace,
       });
       throw error;
     }
@@ -75,7 +82,7 @@ async function callGemini(prompt: string, systemInstruction: string, maxOutputTo
   });
 }
 
-export async function generateChineseDefinition(term: string, context: string | null) {
+export async function generateChineseDefinition(term: string, context: string | null, trace?: TraceContext | null) {
   const isSingleWord = !/\s/.test(term.trim());
   const task = isSingleWord
     ? "Define the English word in concise, natural Simplified Chinese."
@@ -87,6 +94,8 @@ export async function generateChineseDefinition(term: string, context: string | 
   return callGemini(
     prompt,
     "You are the translation engine for a personal English vocabulary collector. Obey the explicit Task in the user message. For any multi-word English input, translate the complete input, including every clause and idea; never answer with definitions of selected words. For a single English word, give its concise most common Simplified Chinese meaning(s), using original context when provided. Reply with only the Chinese result. Do not use markdown, bullets, examples, commentary, or repeat the English input.",
+    300,
+    trace,
   );
 }
 
@@ -94,6 +103,7 @@ export async function renderDictionaryMeaningInChinese(
   term: string,
   dictionary: DictionaryLookup,
   context: string | null,
+  trace?: TraceContext | null,
 ) {
   const lexicalEvidence = dictionary.senses.map((sense, index) => {
     const pos = sense.partOfSpeech ? ` [${sense.partOfSpeech}]` : "";
@@ -106,5 +116,6 @@ export async function renderDictionaryMeaningInChinese(
     `English word: ${term}${contextLine}\nDictionary evidence:\n${lexicalEvidence}\n\nReturn the concise Simplified Chinese meaning that best matches the context. If no context is provided, return the most useful common meaning(s).`,
     "You convert grounded English dictionary evidence into concise, natural Simplified Chinese for a vocabulary collector. Treat the supplied dictionary definitions as the factual source. Select the sense that matches the provided context when possible. Do not invent unsupported senses. Reply with only the Chinese meaning; no markdown, bullets, examples, commentary, or English repetition.",
     160,
+    trace,
   );
 }
