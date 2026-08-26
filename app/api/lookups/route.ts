@@ -6,6 +6,7 @@ import { createLookupEvent, deleteLookupEvent, getHistory } from "@/lib/vocabula
 import { classifyInputV2, normalizeTerm, nullableString } from "@/lib/vocabulary/input";
 import { canonicalizeExpression } from "@/lib/vocabulary/language-judgment";
 import { getVocabularyMeaning } from "@/lib/vocabulary/meaning-provider";
+import { logRequestStage, type TraceContext } from "@/lib/vocabulary/observability";
 import { enrichSentenceExpressions, extractSentenceExpressions, type EnrichedSentenceExpression } from "@/lib/vocabulary/sentence-pipeline";
 
 export const dynamic = "force-dynamic";
@@ -14,13 +15,27 @@ function userId(request: NextRequest) {
   return request.headers.get("oai-authenticated-user-email") || "mia-local";
 }
 
+function jsonWithTrace(body: unknown, status: number, trace: TraceContext) {
+  return NextResponse.json(body, { status, headers: { "x-request-id": trace.requestId } });
+}
+
 export async function POST(request: NextRequest) {
+  const trace: TraceContext = { requestId: crypto.randomUUID(), flow: "lookup" };
+  const requestStartedAt = Date.now();
+  logRequestStage({ trace, stage: "request", outcome: "start" });
+
   await ensureVocabularySchema();
   const body = await request.json().catch(() => null) as Record<string, unknown> | null;
   const displayTerm = nullableString(body?.term);
-  if (!displayTerm) return NextResponse.json({ error: "Please enter a word, phrase, or sentence." }, { status: 400 });
+  if (!displayTerm) {
+    logRequestStage({ trace, stage: "input_validation", outcome: "failure", errorName: "MissingInput" });
+    return jsonWithTrace({ error: "Please enter a word, phrase, or sentence.", requestId: trace.requestId }, 400, trace);
+  }
   const normalized = normalizeTerm(displayTerm);
-  if (!normalized) return NextResponse.json({ error: "Please enter a word, phrase, or sentence." }, { status: 400 });
+  if (!normalized) {
+    logRequestStage({ trace, stage: "input_validation", outcome: "failure", errorName: "EmptyNormalizedInput" });
+    return jsonWithTrace({ error: "Please enter a word, phrase, or sentence.", requestId: trace.requestId }, 400, trace);
+  }
 
   const database = getVocabularyDb();
   const uid = userId(request);
@@ -30,6 +45,7 @@ export async function POST(request: NextRequest) {
   const sourceUrl = nullableString(body?.sourceUrl);
   const note = nullableString(body?.note);
   const inputTypeV2 = classifyInputV2(displayTerm);
+  logRequestStage({ trace, stage: "classification", outcome: "success", inputType: inputTypeV2 });
 
   let v2LookupEventId: string | null = null;
   try {
@@ -43,8 +59,10 @@ export async function POST(request: NextRequest) {
       sourceUrl,
       lookedUpAt: now,
     });
+    logRequestStage({ trace, stage: "lookup_history_start", outcome: "success", inputType: inputTypeV2 });
   } catch (error) {
     console.error("Failed to start v2 lookup mirror", error);
+    logRequestStage({ trace, stage: "lookup_history_start", outcome: "partial", inputType: inputTypeV2, errorName: error instanceof Error ? error.name : "UnknownError" });
   }
 
   const existing = await findEntry(database, uid, normalized);
@@ -73,32 +91,40 @@ export async function POST(request: NextRequest) {
     sourceTitle,
     sourceUrl,
   });
+  logRequestStage({ trace, stage: "legacy_persist", outcome: "success", inputType: inputTypeV2 });
 
   let warning: string | null = null;
   let definition = existing?.chinese_definition as string | null | undefined;
   let sentenceExpressions: EnrichedSentenceExpression[] = [];
   const isMultiWord = /\s/.test(displayTerm.trim());
   if (!definition || context || isMultiWord) {
+    const meaningStartedAt = Date.now();
     try {
-      const meaning = await getVocabularyMeaning(displayTerm, inputTypeV2, context);
+      const meaning = await getVocabularyMeaning(displayTerm, inputTypeV2, context, trace);
       definition = meaning.chineseMeaning;
       await updateChineseDefinition(database, entryId, definition);
+      logRequestStage({ trace, stage: "meaning", outcome: "success", durationMs: Date.now() - meaningStartedAt, inputType: inputTypeV2, provider: meaning.provider });
     } catch (error) {
       console.error("Meaning provider failed", error);
       warning = "词已经保存，但这次中文解释暂时没有生成。请稍后再查一次。";
+      logRequestStage({ trace, stage: "meaning", outcome: "failure", durationMs: Date.now() - meaningStartedAt, inputType: inputTypeV2, errorName: error instanceof Error ? error.name : "UnknownError" });
     }
+  } else {
+    logRequestStage({ trace, stage: "meaning", outcome: "success", inputType: inputTypeV2, provider: "stored" });
   }
 
   if (inputTypeV2 === "sentence" && definition && !warning) {
-    const extracted = await extractSentenceExpressions(displayTerm);
-    sentenceExpressions = await enrichSentenceExpressions(displayTerm, extracted);
+    const sentenceStartedAt = Date.now();
+    const extracted = await extractSentenceExpressions(displayTerm, trace);
+    sentenceExpressions = await enrichSentenceExpressions(displayTerm, extracted, trace);
+    logRequestStage({ trace, stage: "sentence_analysis", outcome: "success", durationMs: Date.now() - sentenceStartedAt, inputType: inputTypeV2 });
   }
 
   if (v2LookupEventId) {
     if (definition && !warning) {
       try {
         const canonicalForm = inputTypeV2 === "phrase"
-          ? await canonicalizeExpression(displayTerm, context, normalized)
+          ? await canonicalizeExpression(displayTerm, context, normalized, trace)
           : normalized;
 
         await completeV2Lookup({
@@ -114,26 +140,33 @@ export async function POST(request: NextRequest) {
           canonicalForm,
           chineseMeaning: definition,
         });
+        logRequestStage({ trace, stage: "v2_persist", outcome: "success", inputType: inputTypeV2 });
       } catch (error) {
         console.error("Failed to complete v2 lookup mirror", error);
+        logRequestStage({ trace, stage: "v2_persist", outcome: "partial", inputType: inputTypeV2, errorName: error instanceof Error ? error.name : "UnknownError" });
       }
     } else {
       try {
         await failV2Lookup(database, uid, v2LookupEventId);
+        logRequestStage({ trace, stage: "v2_persist", outcome: "partial", inputType: inputTypeV2 });
       } catch (error) {
         console.error("Failed to mark v2 lookup mirror as failed", error);
+        logRequestStage({ trace, stage: "v2_persist", outcome: "failure", inputType: inputTypeV2, errorName: error instanceof Error ? error.name : "UnknownError" });
       }
     }
   }
 
   const entry = await findEntryById(database, entryId);
-  return NextResponse.json({
+  const status = warning ? 202 : 200;
+  logRequestStage({ trace, stage: "request", outcome: warning ? "partial" : "success", durationMs: Date.now() - requestStartedAt, inputType: inputTypeV2 });
+  return jsonWithTrace({
     entry: entry ? mapEntry(entry) : null,
     warning,
+    requestId: trace.requestId,
     sentenceAnalysis: inputTypeV2 === "sentence" && definition
       ? { lookupEventId: v2LookupEventId, translation: definition, expressions: sentenceExpressions }
       : null,
-  }, { status: warning ? 202 : 200 });
+  }, status, trace);
 }
 
 export async function GET(request: NextRequest) {
