@@ -21,6 +21,7 @@
     "test:m5": "node --experimental-strip-types --test tests/vocabulary-m5.test.mjs",
     "test:m6": "node --experimental-strip-types --test tests/vocabulary-m6.test.mjs",
     "test:e2e:d1": "node scripts/run-d1-e2e.mjs",
+    "test:e2e:browser": "node scripts/run-browser-e2e.mjs",
     "check:release": "npm run test:m3 && npm run test:m4 && npm run test:m5 && npm run test:m6",
     "check:runtime": "npm run check:release && npm test"
   },
@@ -41,6 +42,7 @@
     "drizzle-kit": "0.31.10",
     "eslint": "9.39.4",
     "eslint-config-next": "16.2.6",
+    "playwright": "1.62.1",
     "react-server-dom-webpack": "19.2.6",
     "tailwindcss": "4.2.1",
     "typescript": "5.9.3",
