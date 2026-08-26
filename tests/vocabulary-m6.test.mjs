@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { buildExternalAttemptEvent, buildRequestStageEvent } from "../lib/vocabulary/observability.ts";
-import { isRetryableHttpStatus, withRetry } from "../lib/vocabulary/retry.ts";
+import { isRetryableHttpStatus, retryDelayMs, withRetry } from "../lib/vocabulary/retry.ts";
 
 test("returns immediately when the first attempt succeeds", async () => {
   let calls = 0;
@@ -50,6 +50,30 @@ test("HTTP retry policy retries 429 and 5xx but not ordinary 4xx", () => {
   assert.equal(isRetryableHttpStatus(503), true);
   assert.equal(isRetryableHttpStatus(400), false);
   assert.equal(isRetryableHttpStatus(404), false);
+});
+
+test("429 backoff is longer than 5xx backoff", () => {
+  assert.equal(retryDelayMs({ status: 429 }, 1), 2000);
+  assert.equal(retryDelayMs({ status: 500 }, 1), 500);
+  assert.equal(retryDelayMs(new Error("network"), 1), 0);
+});
+
+test("retry delay can be overridden for deterministic callers", async () => {
+  let calls = 0;
+  let delayCalls = 0;
+  const value = await withRetry(async () => {
+    calls += 1;
+    if (calls === 1) throw { status: 429 };
+    return "ok";
+  }, {
+    maxAttempts: 2,
+    delayMs: () => {
+      delayCalls += 1;
+      return 0;
+    },
+  });
+  assert.equal(value, "ok");
+  assert.equal(delayCalls, 1);
 });
 
 test("request-stage events preserve one request id across stages without user content", () => {
