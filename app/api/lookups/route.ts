@@ -96,6 +96,7 @@ export async function POST(request: NextRequest) {
   let warning: string | null = null;
   let definition = existing?.chinese_definition as string | null | undefined;
   let sentenceExpressions: EnrichedSentenceExpression[] = [];
+  let sentenceAnalysisDegraded = false;
   const isMultiWord = /\s/.test(displayTerm.trim());
   if (!definition || context || isMultiWord) {
     const meaningStartedAt = Date.now();
@@ -115,9 +116,17 @@ export async function POST(request: NextRequest) {
 
   if (inputTypeV2 === "sentence" && definition && !warning) {
     const sentenceStartedAt = Date.now();
-    const extracted = await extractSentenceExpressions(displayTerm, trace);
-    sentenceExpressions = await enrichSentenceExpressions(displayTerm, extracted, trace);
-    logRequestStage({ trace, stage: "sentence_analysis", outcome: "success", durationMs: Date.now() - sentenceStartedAt, inputType: inputTypeV2 });
+    const extraction = await extractSentenceExpressions(displayTerm, trace);
+    sentenceExpressions = await enrichSentenceExpressions(displayTerm, extraction.expressions, trace);
+    sentenceAnalysisDegraded = extraction.status === "failed"
+      || sentenceExpressions.some((expression) => expression.meaningStatus === "unavailable");
+    logRequestStage({
+      trace,
+      stage: "sentence_analysis",
+      outcome: sentenceAnalysisDegraded ? "partial" : "success",
+      durationMs: Date.now() - sentenceStartedAt,
+      inputType: inputTypeV2,
+    });
   }
 
   if (v2LookupEventId) {
@@ -157,8 +166,9 @@ export async function POST(request: NextRequest) {
   }
 
   const entry = await findEntryById(database, entryId);
+  const requestPartial = Boolean(warning) || sentenceAnalysisDegraded;
   const status = warning ? 202 : 200;
-  logRequestStage({ trace, stage: "request", outcome: warning ? "partial" : "success", durationMs: Date.now() - requestStartedAt, inputType: inputTypeV2 });
+  logRequestStage({ trace, stage: "request", outcome: requestPartial ? "partial" : "success", durationMs: Date.now() - requestStartedAt, inputType: inputTypeV2 });
   return jsonWithTrace({
     entry: entry ? mapEntry(entry) : null,
     warning,
