@@ -5,7 +5,7 @@ import { classifyInputV2, normalizeTerm } from "../lib/vocabulary/input.ts";
 import {
   canonicalFormFromPayload,
   senseMatchFromPayload,
-} from "../lib/vocabulary/language-judgment.ts";
+} from "../lib/vocabulary/language-judgment-validation.ts";
 
 test("classifies word, phrase, and sentence inputs", () => {
   assert.equal(classifyInputV2("reluctant"), "word");
