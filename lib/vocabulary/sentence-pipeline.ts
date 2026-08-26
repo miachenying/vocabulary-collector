@@ -18,7 +18,7 @@ export async function extractSentenceExpressions(
 ): Promise<SentenceExtractionResult> {
   const prompt = `Task: Select up to 3 useful reusable English expressions from the sentence for a personal vocabulary collector.\n
 Sentence: ${sentence}\n
-Selection criteria:\n- Prefer idioms, fixed expressions, phrasal verbs, or concise contextually meaningful reusable expressions.\n- Avoid ordinary collocations, basic words, random noun phrases, and expressions that are only mildly advanced.\n- Returning zero expressions is correct when nothing is worth saving.\n- Every encountered_form must appear verbatim in the sentence.\n- canonical_form should be a concise reusable dictionary-style form; normalize tense/inflection/pronouns when useful.\n- Never return more than 3 expressions.\n
+Selection criteria:\n- Prefer idioms, fixed expressions, phrasal verbs, or concise contextually meaningful reusable expressions.\n- Avoid ordinary collocations, basic words, random noun phrases, and expressions that are only mildly advanced.\n- Do not extract standalone degree/intensity/modifier fragments such as \"not quite\", \"very much\", \"really\", or \"just\".\n- Returning zero expressions is correct when nothing is worth saving.\n- Every encountered_form must appear verbatim in the sentence.\n- canonical_form should be a concise reusable dictionary-style form; normalize tense/inflection/pronouns when useful.\n- Never return more than 3 expressions.\n
 Return exactly this shape:\n{"expressions":[{"encountered_form":"...","canonical_form":"...","reason":"idiom|phrasal_verb|fixed_expression|contextual_expression"}]}`;
 
   const startedAt = Date.now();
