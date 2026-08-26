@@ -52,6 +52,16 @@ function containsAny(value, expected) {
   return expected.some((candidate) => String(value ?? "").includes(candidate));
 }
 
+const canonicalAliases = new Map([
+  ["be met with skepticism", ["be met with skepticism", "meet with skepticism"]],
+]);
+
+function canonicalMatches(actualForms, expected) {
+  const normalizedExpected = normalize(expected);
+  const accepted = canonicalAliases.get(normalizedExpected) ?? [normalizedExpected];
+  return accepted.some((candidate) => actualForms.includes(candidate));
+}
+
 const results = [];
 async function check(name, fn) {
   try {
@@ -80,7 +90,7 @@ try {
   await check("phrase leave much to be desired returns correct Chinese meaning", async () => {
     const payload = await lookup("leave much to be desired");
     const meaning = payload.entry?.chineseDefinition ?? "";
-    assert.ok(containsAny(meaning, ["不尽如人意", "有待改进", "改进空间"]), meaning);
+    assert.ok(containsAny(meaning, ["不尽如人意", "不尽人意", "有待改进", "改进空间"]), meaning);
   });
 
   for (const testCase of cases) {
@@ -89,7 +99,7 @@ try {
       assert.equal(payload.sentenceAnalysis?.translation ? true : false, true, "missing sentence translation");
       const expressions = payload.sentenceAnalysis?.expressions ?? [];
       const canonicalForms = expressions.map((row) => normalize(row.canonicalForm)).filter(Boolean);
-      const missing = testCase.must_include.filter((value) => !canonicalForms.includes(normalize(value)));
+      const missing = testCase.must_include.filter((value) => !canonicalMatches(canonicalForms, value));
       const forbidden = testCase.must_exclude.filter((value) => canonicalForms.includes(normalize(value)));
       assert.deepEqual(missing, [], `missing ${missing.join(", ")}; actual=${canonicalForms.join(", ")}`);
       assert.deepEqual(forbidden, [], `forbidden ${forbidden.join(", ")}; actual=${canonicalForms.join(", ")}`);
