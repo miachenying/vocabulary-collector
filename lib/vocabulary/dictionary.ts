@@ -26,9 +26,12 @@ type DictionaryApiEntry = {
 };
 
 class DictionaryHttpError extends Error {
-  constructor(public status: number) {
+  status: number;
+
+  constructor(status: number) {
     super(`Dictionary request failed (${status}).`);
     this.name = "DictionaryHttpError";
+    this.status = status;
   }
 }
 
