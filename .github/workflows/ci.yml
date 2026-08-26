@@ -2,7 +2,7 @@ name: Vocabulary Collector CI
 
 on:
   push:
-    branches: [v2-dev]
+    branches: [v2-dev, main]
   pull_request:
     branches: [main]
   workflow_dispatch:
