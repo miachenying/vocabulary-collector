@@ -1,0 +1,109 @@
+import assert from "node:assert/strict";
+import { Miniflare } from "miniflare";
+import fs from "node:fs/promises";
+
+const apiKey = process.env.GEMINI_API_KEY;
+if (!apiKey) {
+  console.error("GEMINI_API_KEY is required for live semantic evals.");
+  process.exit(2);
+}
+
+const cases = JSON.parse(await fs.readFile("evals/m4-sentence-cases.json", "utf8"));
+const miniflare = new Miniflare({
+  modules: true,
+  script: "export default { async fetch() { return new Response('ok'); } }",
+  compatibilityDate: "2026-05-22",
+  d1Databases: ["DB"],
+});
+
+const database = await miniflare.getD1Database("DB");
+const workerUrl = new URL("../dist/server/index.js", import.meta.url);
+workerUrl.searchParams.set("live-eval", `${process.pid}-${Date.now()}`);
+const { default: worker } = await import(workerUrl.href);
+
+const env = {
+  DB: database,
+  GEMINI_API_KEY: apiKey,
+  ASSETS: { fetch: async () => new Response("Not found", { status: 404 }) },
+  IMAGES: { input() { throw new Error("Image binding is not used by semantic evals."); } },
+};
+const ctx = { waitUntil() {}, passThroughOnException() {} };
+const userId = "semantic-eval@example.com";
+
+async function lookup(term) {
+  const response = await worker.fetch(new Request("http://localhost/api/lookups", {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      "oai-authenticated-user-email": userId,
+    },
+    body: JSON.stringify({ term }),
+  }), env, ctx);
+  const payload = await response.json();
+  assert.equal(response.status, 200, JSON.stringify(payload));
+  return payload;
+}
+
+function normalize(value) {
+  return String(value ?? "").trim().toLocaleLowerCase("en-US");
+}
+
+function containsAny(value, expected) {
+  return expected.some((candidate) => String(value ?? "").includes(candidate));
+}
+
+const results = [];
+async function check(name, fn) {
+  try {
+    await fn();
+    results.push({ name, passed: true });
+    console.log(`PASS ${name}`);
+  } catch (error) {
+    results.push({ name, passed: false, error: error instanceof Error ? error.message : String(error) });
+    console.error(`FAIL ${name}:`, error);
+  }
+}
+
+try {
+  await check("word reluctant returns correct Chinese meaning", async () => {
+    const payload = await lookup("reluctant");
+    const meaning = payload.entry?.chineseDefinition ?? "";
+    assert.ok(containsAny(meaning, ["不情愿", "不愿", "勉强"]), meaning);
+  });
+
+  await check("word scrutinize returns correct Chinese meaning", async () => {
+    const payload = await lookup("scrutinize");
+    const meaning = payload.entry?.chineseDefinition ?? "";
+    assert.ok(containsAny(meaning, ["仔细审查", "仔细检查", "细看", "审视"]), meaning);
+  });
+
+  await check("phrase leave much to be desired returns correct Chinese meaning", async () => {
+    const payload = await lookup("leave much to be desired");
+    const meaning = payload.entry?.chineseDefinition ?? "";
+    assert.ok(containsAny(meaning, ["不尽如人意", "有待改进", "改进空间"]), meaning);
+  });
+
+  for (const testCase of cases) {
+    await check(`sentence extraction ${testCase.id}`, async () => {
+      const payload = await lookup(testCase.sentence);
+      assert.equal(payload.sentenceAnalysis?.translation ? true : false, true, "missing sentence translation");
+      const expressions = payload.sentenceAnalysis?.expressions ?? [];
+      const canonicalForms = expressions.map((row) => normalize(row.canonicalForm)).filter(Boolean);
+      const missing = testCase.must_include.filter((value) => !canonicalForms.includes(normalize(value)));
+      const forbidden = testCase.must_exclude.filter((value) => canonicalForms.includes(normalize(value)));
+      assert.deepEqual(missing, [], `missing ${missing.join(", ")}; actual=${canonicalForms.join(", ")}`);
+      assert.deepEqual(forbidden, [], `forbidden ${forbidden.join(", ")}; actual=${canonicalForms.join(", ")}`);
+      assert.ok(canonicalForms.length <= testCase.max_expressions, `too many expressions: ${canonicalForms.join(", ")}`);
+      for (const expression of expressions) {
+        assert.equal(expression.meaningStatus, "ready", `meaning unavailable for ${expression.canonicalForm}`);
+        assert.ok(String(expression.chineseMeaning ?? "").trim(), `blank meaning for ${expression.canonicalForm}`);
+      }
+    });
+  }
+} finally {
+  await miniflare.dispose();
+}
+
+const failed = results.filter((result) => !result.passed);
+console.log(`\nLive semantic eval summary: ${results.length - failed.length}/${results.length} passed.`);
+if (failed.length) process.exit(1);
