@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { enrichSentenceExpressionsWith } from "../lib/vocabulary/sentence-enrichment.ts";
 import { expressionsFromPayload } from "../lib/vocabulary/sentence-expressions.ts";
 
 test("keeps up to three valid reusable expressions from the sentence", () => {
@@ -49,4 +50,44 @@ test("rejects malformed rows and duplicate canonical forms", () => {
     { encounteredForm: "brushed the criticism off", canonicalForm: "brush off", reason: "phrasal_verb" },
     { encounteredForm: "carried on", canonicalForm: "carry on", reason: "phrasal_verb" },
   ]);
+});
+
+test("attaches Chinese meanings to extracted expressions", async () => {
+  const expressions = [
+    { encounteredForm: "won them over", canonicalForm: "win someone over", reason: "idiom" },
+    { encounteredForm: "head-on", canonicalForm: "head-on", reason: "contextual_expression" },
+  ];
+  const enriched = await enrichSentenceExpressionsWith(expressions, "She faced it head-on and won them over.", async (expression) => {
+    return expression.canonicalForm === "win someone over" ? "赢得某人的支持；说服某人" : "正面地；迎面地";
+  });
+
+  assert.deepEqual(enriched, [
+    { ...expressions[0], chineseMeaning: "赢得某人的支持；说服某人", meaningStatus: "ready" },
+    { ...expressions[1], chineseMeaning: "正面地；迎面地", meaningStatus: "ready" },
+  ]);
+});
+
+test("one expression meaning failure does not remove other suggestions", async () => {
+  const expressions = [
+    { encounteredForm: "brushed it off", canonicalForm: "brush off", reason: "phrasal_verb" },
+    { encounteredForm: "carried on", canonicalForm: "carry on", reason: "phrasal_verb" },
+  ];
+  const enriched = await enrichSentenceExpressionsWith(expressions, "She brushed it off and carried on.", async (expression) => {
+    if (expression.canonicalForm === "brush off") throw new Error("provider unavailable");
+    return "继续进行";
+  });
+
+  assert.deepEqual(enriched, [
+    { ...expressions[0], chineseMeaning: null, meaningStatus: "unavailable" },
+    { ...expressions[1], chineseMeaning: "继续进行", meaningStatus: "ready" },
+  ]);
+});
+
+test("blank provider output is treated as unavailable", async () => {
+  const expressions = [
+    { encounteredForm: "add up", canonicalForm: "add up", reason: "phrasal_verb" },
+  ];
+  const enriched = await enrichSentenceExpressionsWith(expressions, "It doesn't add up.", async () => "   ");
+  assert.equal(enriched[0].chineseMeaning, null);
+  assert.equal(enriched[0].meaningStatus, "unavailable");
 });

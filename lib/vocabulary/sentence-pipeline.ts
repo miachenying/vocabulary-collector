@@ -1,7 +1,10 @@
 import { generateLanguageJson } from "./language-judgment";
+import { getVocabularyMeaning } from "./meaning-provider";
 import { expressionsFromPayload, type ExtractedExpression } from "./sentence-expressions";
+import { enrichSentenceExpressionsWith, type EnrichedSentenceExpression } from "./sentence-enrichment";
 
 export type { ExtractedExpression } from "./sentence-expressions";
+export type { EnrichedSentenceExpression } from "./sentence-enrichment";
 
 export async function extractSentenceExpressions(sentence: string): Promise<ExtractedExpression[]> {
   const prompt = `Task: Select up to 3 useful reusable English expressions from the sentence for a personal vocabulary collector.\n
@@ -15,4 +18,15 @@ Return exactly this shape:\n{"expressions":[{"encountered_form":"...","canonical
     console.error("Sentence expression extraction failed; returning no suggestions", error);
     return [];
   }
+}
+
+export async function enrichSentenceExpressions(
+  sentence: string,
+  expressions: ExtractedExpression[],
+): Promise<EnrichedSentenceExpression[]> {
+  return enrichSentenceExpressionsWith(expressions, sentence, async (expression, originalSentence) => {
+    const inputType = /\s/.test(expression.canonicalForm.trim()) ? "phrase" : "word";
+    const meaning = await getVocabularyMeaning(expression.canonicalForm, inputType, originalSentence);
+    return meaning.chineseMeaning;
+  });
 }

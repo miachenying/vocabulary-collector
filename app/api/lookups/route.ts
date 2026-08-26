@@ -6,7 +6,7 @@ import { createLookupEvent, deleteLookupEvent, getHistory } from "@/lib/vocabula
 import { classifyInputV2, normalizeTerm, nullableString } from "@/lib/vocabulary/input";
 import { canonicalizeExpression } from "@/lib/vocabulary/language-judgment";
 import { getVocabularyMeaning } from "@/lib/vocabulary/meaning-provider";
-import { extractSentenceExpressions, type ExtractedExpression } from "@/lib/vocabulary/sentence-pipeline";
+import { enrichSentenceExpressions, extractSentenceExpressions, type EnrichedSentenceExpression } from "@/lib/vocabulary/sentence-pipeline";
 
 export const dynamic = "force-dynamic";
 
@@ -76,7 +76,7 @@ export async function POST(request: NextRequest) {
 
   let warning: string | null = null;
   let definition = existing?.chinese_definition as string | null | undefined;
-  let sentenceExpressions: ExtractedExpression[] = [];
+  let sentenceExpressions: EnrichedSentenceExpression[] = [];
   const isMultiWord = /\s/.test(displayTerm.trim());
   if (!definition || context || isMultiWord) {
     try {
@@ -90,7 +90,8 @@ export async function POST(request: NextRequest) {
   }
 
   if (inputTypeV2 === "sentence" && definition && !warning) {
-    sentenceExpressions = await extractSentenceExpressions(displayTerm);
+    const extracted = await extractSentenceExpressions(displayTerm);
+    sentenceExpressions = await enrichSentenceExpressions(displayTerm, extracted);
   }
 
   if (v2LookupEventId) {
