@@ -12,6 +12,7 @@ export type LookupEventV2Row = {
   context_sentence: string | null;
   source_title: string | null;
   source_url: string | null;
+  note: string | null;
   looked_up_at: string;
   created_at: string;
 };
@@ -25,6 +26,7 @@ type CreateLookupEventV2Input = {
   contextSentence?: string | null;
   sourceTitle?: string | null;
   sourceUrl?: string | null;
+  note?: string | null;
   lookedUpAt: string;
 };
 
@@ -38,14 +40,15 @@ export async function createLookupEventV2(input: CreateLookupEventV2Input) {
     contextSentence = null,
     sourceTitle = null,
     sourceUrl = null,
+    note = null,
     lookedUpAt,
   } = input;
   const id = crypto.randomUUID();
 
   await database.prepare(`INSERT INTO lookup_events_v2
-    (id, user_id, raw_input, input_type, status, context_sentence, source_title, source_url, looked_up_at, created_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
-    .bind(id, userId, rawInput, inputType, status, contextSentence, sourceTitle, sourceUrl, lookedUpAt, lookedUpAt).run();
+    (id, user_id, raw_input, input_type, status, context_sentence, source_title, source_url, note, looked_up_at, created_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+    .bind(id, userId, rawInput, inputType, status, contextSentence, sourceTitle, sourceUrl, note, lookedUpAt, lookedUpAt).run();
 
   return database.prepare("SELECT * FROM lookup_events_v2 WHERE id = ? AND user_id = ?")
     .bind(id, userId).first<LookupEventV2Row>();

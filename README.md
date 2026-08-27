@@ -1,4 +1,6 @@
-# vinext-starter
+# Vocabulary Collector V3
+
+V3 adds authenticated per-user data isolation and a Chrome selection-capture entry point to the V2 lookup, Collection, and History product. See `docs/v3-design-spec.md` and `extensions/chrome/README.md`.
 
 A clean full-stack starter running on
 [vinext](https://github.com/cloudflare/vinext), with optional Cloudflare D1 and

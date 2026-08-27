@@ -74,6 +74,7 @@ export async function saveSentenceSuggestion(input: {
       contextSentence: event.raw_input,
       sourceTitle: event.source_title,
       sourceUrl: event.source_url,
+      note: event.note,
       encounteredAt: event.looked_up_at || now,
     });
   }

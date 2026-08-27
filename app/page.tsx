@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, useMemo, useState } from "react";
+import { FormEvent, useEffect, useMemo, useState } from "react";
 
 type Entry = {
   id: string;
@@ -45,8 +45,18 @@ type CollectionItem = {
   contextSentence: string | null;
   sourceTitle: string | null;
   sourceUrl: string | null;
+  note: string | null;
   encounteredAt: string;
   encounterCount: number;
+  encounters: Array<{
+    id: string;
+    encounteredForm: string;
+    contextSentence: string | null;
+    sourceTitle: string | null;
+    sourceUrl: string | null;
+    note: string | null;
+    encounteredAt: string;
+  }>;
 };
 
 type HistoryResponse = {
@@ -107,20 +117,77 @@ export default function Home() {
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [collection, setCollection] = useState<CollectionItem[]>([]);
   const [collectionLoading, setCollectionLoading] = useState(false);
+  const [expandedCollectionIds, setExpandedCollectionIds] = useState<string[]>([]);
+  const [deletingEncounterId, setDeletingEncounterId] = useState<string | null>(null);
+  const [capturedFromPage, setCapturedFromPage] = useState(false);
 
-  async function openCollection() {
-    setView("collection");
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const capturedTerm = params.get("term")?.trim();
+    if (!capturedTerm) return;
+    const timer = window.setTimeout(() => {
+      setTerm(capturedTerm.slice(0, 2000));
+      setContext((params.get("context") ?? "").slice(0, 5000));
+      setSourceTitle((params.get("sourceTitle") ?? "").slice(0, 500));
+      setSourceUrl((params.get("sourceUrl") ?? "").slice(0, 2000));
+      setDetailsOpen(Boolean(params.get("context") || params.get("sourceTitle") || params.get("sourceUrl")));
+      setCapturedFromPage(params.get("capture") === "1");
+    }, 0);
+    return () => window.clearTimeout(timer);
+  }, []);
+
+  function redirectToSignIn(response: Response, payload: { code?: string }) {
+    if (response.status !== 401 || payload.code !== "authentication_required") return false;
+    const returnTo = `${window.location.pathname}${window.location.search}`;
+    window.location.assign(`/signin-with-chatgpt?return_to=${encodeURIComponent(returnTo)}`);
+    return true;
+  }
+
+  async function loadCollection() {
     setCollectionLoading(true);
     setMessage(null);
     try {
       const response = await fetch("/api/collection");
+      const payload = await response.json() as { items?: CollectionItem[]; code?: string };
+      if (redirectToSignIn(response, payload)) return;
       if (!response.ok) throw new Error("Could not load collection");
-      const payload = await response.json() as { items?: CollectionItem[] };
       setCollection(payload.items ?? []);
     } catch {
       setMessage("Collection is temporarily unavailable. Please try again.");
     } finally {
       setCollectionLoading(false);
+    }
+  }
+
+  function openCollection() {
+    setView("collection");
+    void loadCollection();
+  }
+
+  function toggleCollectionItem(itemId: string) {
+    setExpandedCollectionIds((current) => current.includes(itemId)
+      ? current.filter((id) => id !== itemId)
+      : [...current, itemId]);
+  }
+
+  async function deleteEncounter(encounterId: string) {
+    if (deletingEncounterId) return;
+    setDeletingEncounterId(encounterId);
+    setMessage(null);
+    try {
+      const response = await fetch("/api/collection", {
+        method: "DELETE",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ encounterId }),
+      });
+      const payload = await response.json();
+      if (redirectToSignIn(response, payload)) return;
+      if (!response.ok) throw new Error(payload.error || "Delete failed");
+      await loadCollection();
+    } catch {
+      setMessage("This encounter could not be deleted. Please try again.");
+    } finally {
+      setDeletingEncounterId(null);
     }
   }
 
@@ -130,8 +197,10 @@ export default function Home() {
       const bounds = toIsoBounds(nextRange.start, nextRange.end);
       const qs = new URLSearchParams(bounds);
       const response = await fetch(`/api/lookups?${qs}`);
+      const payload = await response.json();
+      if (redirectToSignIn(response, payload)) return;
       if (!response.ok) throw new Error("Could not load history");
-      setHistory(await response.json());
+      setHistory(payload);
     } catch {
       setMessage("History is temporarily unavailable. Please try again.");
     } finally {
@@ -160,6 +229,7 @@ export default function Home() {
         body: JSON.stringify({ term, context, sourceTitle, sourceUrl, note }),
       });
       const payload = await response.json();
+      if (redirectToSignIn(response, payload)) return;
       if (!response.ok && !payload.entry) throw new Error(payload.error || "Lookup failed");
       setResult(payload.entry);
       setSentenceAnalysis(payload.sentenceAnalysis ?? null);
@@ -188,6 +258,7 @@ export default function Home() {
         }),
       });
       const payload = await response.json();
+      if (redirectToSignIn(response, payload)) return;
       if (!response.ok) throw new Error(payload.error || "Save failed");
       setSavedCanonicalForms((current) => current.includes(expression.canonicalForm)
         ? current
@@ -215,6 +286,8 @@ export default function Home() {
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ eventId: entry.lastEventId }),
       });
+      const payload = await response.json();
+      if (redirectToSignIn(response, payload)) return;
       if (!response.ok) throw new Error("Delete failed");
       await loadHistory();
     } catch {
@@ -254,7 +327,7 @@ export default function Home() {
         </button>
         <nav className="nav-tabs" aria-label="Primary navigation">
           <button className={view === "lookup" ? "active" : ""} onClick={() => setView("lookup")}>Lookup</button>
-          <button className={view === "collection" ? "active" : ""} onClick={() => void openCollection()}>Collection</button>
+          <button className={view === "collection" ? "active" : ""} onClick={openCollection}>Collection</button>
           <button className={view === "history" ? "active" : ""} onClick={openHistory}>History</button>
         </nav>
       </header>
@@ -268,6 +341,7 @@ export default function Home() {
           </div>
 
           <div className="lookup-card">
+            {capturedFromPage && <p className="capture-banner">Captured from your browser — review the context, then look it up.</p>}
             <form onSubmit={lookup}>
               <label htmlFor="term">English word, phrase, or sentence</label>
               <div className="lookup-row">
@@ -344,7 +418,9 @@ export default function Home() {
           <div className="history-list collection-list" aria-live="polite">
             {collectionLoading ? <p className="empty">Loading collection…</p> : collection.length === 0 ? (
               <p className="empty">Nothing saved yet. Look up a word or save an expression to start your collection.</p>
-            ) : collection.map((item) => (
+            ) : collection.map((item) => {
+              const expanded = expandedCollectionIds.includes(item.id);
+              return (
               <article className="history-item collection-item" key={item.id}>
                 <div className="item-main">
                   <div className="term-line"><h2>{item.canonicalForm}</h2><span className="repeat-badge">{item.itemType}</span></div>
@@ -352,13 +428,35 @@ export default function Home() {
                   {item.encounteredForm !== item.canonicalForm && <small>Encountered as: {item.encounteredForm}</small>}
                   {item.contextSentence && <blockquote>“{item.contextSentence}”</blockquote>}
                   {(item.sourceTitle || item.sourceUrl) && <small>Source: {item.sourceUrl ? <a href={item.sourceUrl} target="_blank" rel="noreferrer">{item.sourceTitle || item.sourceUrl}</a> : item.sourceTitle}</small>}
+                  {item.note && <p className="encounter-note">Note: {item.note}</p>}
+                  <button className="encounter-toggle" type="button" onClick={() => toggleCollectionItem(item.id)} aria-expanded={expanded}>
+                    {expanded ? "Hide encounters" : `View ${item.encounterCount} ${item.encounterCount === 1 ? "encounter" : "encounters"}`}
+                  </button>
+                  {expanded && (
+                    <div className="encounter-list">
+                      {item.encounters.map((encounter) => (
+                        <section className="encounter-row" key={encounter.id}>
+                          <div>
+                            <strong>{encounter.encounteredForm}</strong>
+                            {encounter.contextSentence && <blockquote>“{encounter.contextSentence}”</blockquote>}
+                            {(encounter.sourceTitle || encounter.sourceUrl) && <small>Source: {encounter.sourceUrl ? <a href={encounter.sourceUrl} target="_blank" rel="noreferrer">{encounter.sourceTitle || encounter.sourceUrl}</a> : encounter.sourceTitle}</small>}
+                            {encounter.note && <p className="encounter-note">Note: {encounter.note}</p>}
+                            <time>{new Date(encounter.encounteredAt).toLocaleString([], { month: "short", day: "numeric", year: "numeric", hour: "numeric", minute: "2-digit" })}</time>
+                          </div>
+                          <button className="delete-button" type="button" disabled={Boolean(deletingEncounterId)} onClick={() => void deleteEncounter(encounter.id)}>
+                            {deletingEncounterId === encounter.id ? "Deleting…" : "Delete"}
+                          </button>
+                        </section>
+                      ))}
+                    </div>
+                  )}
                 </div>
                 <div className="collection-times">
                   <span className="encounter-count">{item.encounterCount} {item.encounterCount === 1 ? "encounter" : "encounters"}</span>
                   <time>Last seen {new Date(item.encounteredAt).toLocaleString([], { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}</time>
                 </div>
               </article>
-            ))}
+            );})}
           </div>
           {message && <p className="message" role="status">{message}</p>}
         </section>

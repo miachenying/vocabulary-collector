@@ -46,6 +46,7 @@ try {
   const page = await browser.newPage();
   page.setDefaultTimeout(10_000);
   let savedPayload = null;
+  let deletedEncounterId = null;
 
   await page.route("**/api/lookups", async (route) => {
     if (route.request().method() !== "POST") return route.continue();
@@ -97,9 +98,17 @@ try {
           createdAt: "2026-08-26T18:00:00.000Z", chineseMeaning: "说得通；合乎情理",
           encounteredForm: "doesn't quite add up", contextSentence: sentence,
           sourceTitle: "Browser E2E", sourceUrl: "https://example.com/browser",
-          encounteredAt: "2026-08-26T18:00:00.000Z", encounterCount: 2,
+          note: "Remember this reasoning pattern.", encounteredAt: "2026-08-26T18:00:00.000Z", encounterCount: 2,
+          encounters: [
+            { id: "encounter-new", encounteredForm: "doesn't quite add up", contextSentence: sentence, sourceTitle: "Browser E2E", sourceUrl: "https://example.com/browser", note: "Remember this reasoning pattern.", encounteredAt: "2026-08-26T18:00:00.000Z" },
+            { id: "encounter-old", encounteredForm: "add up", contextSentence: "The figures add up.", sourceTitle: "Earlier source", sourceUrl: null, note: null, encounteredAt: "2026-08-25T18:00:00.000Z" },
+          ],
         }] }),
       });
+    }
+    if (route.request().method() === "DELETE") {
+      deletedEncounterId = route.request().postDataJSON().encounterId;
+      return route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ deleted: true }) });
     }
     savedPayload = route.request().postDataJSON();
     await route.fulfill({
@@ -115,6 +124,20 @@ try {
       }),
     });
   });
+
+  const captureQuery = new URLSearchParams({
+    capture: "1",
+    term: "caught off guard",
+    context: "The announcement caught everyone off guard.",
+    sourceTitle: "Captured Article",
+    sourceUrl: "https://example.com/article",
+  });
+  await page.goto(`${baseUrl}/?${captureQuery}`, { waitUntil: "networkidle" });
+  await page.getByText("Captured from your browser", { exact: false }).waitFor();
+  assert.equal(await page.locator("#term").inputValue(), "caught off guard");
+  assert.equal(await page.getByLabel("Original sentence").inputValue(), "The announcement caught everyone off guard.");
+  assert.equal(await page.getByLabel("Source name").inputValue(), "Captured Article");
+  assert.equal(await page.getByLabel("Source URL").inputValue(), "https://example.com/article");
 
   await page.goto(baseUrl, { waitUntil: "networkidle" });
   await page.locator("#term").fill(sentence);
@@ -141,8 +164,14 @@ try {
   await page.getByText("Encountered as: doesn't quite add up", { exact: true }).waitFor();
   await page.getByText("Browser E2E", { exact: true }).waitFor();
   await page.getByText("2 encounters", { exact: true }).waitFor();
+  await page.getByRole("button", { name: "View 2 encounters", exact: true }).click();
+  await page.getByText("Remember this reasoning pattern.", { exact: false }).last().waitFor();
+  await page.getByText("Earlier source", { exact: false }).waitFor();
+  const encounterDeletes = page.getByRole("button", { name: "Delete", exact: true });
+  await encounterDeletes.first().click();
+  assert.equal(deletedEncounterId, "encounter-new");
 
-  console.log("Browser E2E passed: sentence suggestion saved and the Collection view displayed its review context.");
+  console.log("Browser E2E passed: capture prefill, encounter notes, expansion, and deletion were verified.");
 } catch (error) {
   console.error(serverLog);
   throw error;

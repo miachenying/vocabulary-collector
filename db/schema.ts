@@ -49,6 +49,7 @@ export const lookupEventsV2 = sqliteTable("lookup_events_v2", {
   contextSentence: text("context_sentence"),
   sourceTitle: text("source_title"),
   sourceUrl: text("source_url"),
+  note: text("note"),
   lookedUpAt: text("looked_up_at").notNull(),
   createdAt: text("created_at").notNull(),
 }, (table) => [
@@ -89,6 +90,7 @@ export const encounters = sqliteTable("encounters", {
   contextSentence: text("context_sentence"),
   sourceTitle: text("source_title"),
   sourceUrl: text("source_url"),
+  note: text("note"),
   encounteredAt: text("encountered_at").notNull(),
   createdAt: text("created_at").notNull(),
 }, (table) => [

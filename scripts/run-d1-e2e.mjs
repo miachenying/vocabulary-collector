@@ -3,6 +3,11 @@ import { Miniflare } from "miniflare";
 
 const lookupEventId = `e2e-lookup-${Date.now()}`;
 const userId = "e2e@example.com";
+const stableUserId = "e2e-stable-user";
+const authenticatedHeaders = {
+  "oai-authenticated-user-id": stableUserId,
+  "oai-authenticated-user-email": userId,
+};
 
 const miniflare = new Miniflare({
   modules: true,
@@ -12,6 +17,16 @@ const miniflare = new Miniflare({
 });
 
 const database = await miniflare.getD1Database("DB");
+await database.prepare(`CREATE TABLE lookup_events_v2 (
+  id TEXT PRIMARY KEY, user_id TEXT NOT NULL, raw_input TEXT NOT NULL, input_type TEXT NOT NULL,
+  status TEXT NOT NULL, context_sentence TEXT, source_title TEXT, source_url TEXT,
+  looked_up_at TEXT NOT NULL, created_at TEXT NOT NULL
+)`).run();
+await database.prepare(`CREATE TABLE encounters (
+  id TEXT PRIMARY KEY, vocabulary_item_id TEXT NOT NULL, vocabulary_sense_id TEXT NOT NULL,
+  lookup_event_id TEXT, encountered_form TEXT NOT NULL, context_sentence TEXT, source_title TEXT,
+  source_url TEXT, encountered_at TEXT NOT NULL, created_at TEXT NOT NULL
+)`).run();
 const workerUrl = new URL("../dist/server/index.js", import.meta.url);
 workerUrl.searchParams.set("e2e", `${process.pid}-${Date.now()}`);
 const { default: worker } = await import(workerUrl.href);
@@ -38,15 +53,22 @@ async function appFetch(path, init = {}) {
 }
 
 try {
+  const anonymousLookup = await appFetch("/api/lookups?start=2026-08-01&end=2026-08-31");
+  assert.equal(anonymousLookup.status, 401);
+  assert.equal((await anonymousLookup.json()).code, "authentication_required");
+
+  const anonymousCollection = await appFetch("/api/collection");
+  assert.equal(anonymousCollection.status, 401);
+
   // The lookup route initializes both legacy and v2 schema before validating dates.
   const initResponse = await appFetch("/api/lookups?start=bad&end=bad", {
-    headers: { "oai-authenticated-user-email": userId },
+    headers: authenticatedHeaders,
   });
   assert.equal(initResponse.status, 400);
 
   await database.prepare(`INSERT INTO lookup_events_v2 (
-    id, user_id, raw_input, input_type, status, context_sentence, source_title, source_url, looked_up_at, created_at
-  ) VALUES (?, ?, ?, 'sentence', 'success', NULL, 'E2E', 'https://example.com/e2e', ?, ?)`)
+    id, user_id, raw_input, input_type, status, context_sentence, source_title, source_url, note, looked_up_at, created_at
+  ) VALUES (?, ?, ?, 'sentence', 'success', NULL, 'E2E', 'https://example.com/e2e', 'Remember the logic.', ?, ?)`)
     .bind(
       lookupEventId,
       userId,
@@ -67,7 +89,7 @@ try {
     method: "POST",
     headers: {
       "content-type": "application/json",
-      "oai-authenticated-user-email": userId,
+      ...authenticatedHeaders,
     },
     body: JSON.stringify(body),
   });
@@ -82,7 +104,7 @@ try {
     method: "POST",
     headers: {
       "content-type": "application/json",
-      "oai-authenticated-user-email": userId,
+      ...authenticatedHeaders,
     },
     body: JSON.stringify(body),
   });
@@ -97,7 +119,7 @@ try {
     (SELECT COUNT(*) FROM vocabulary_items WHERE user_id = ? AND canonical_form = 'add up') AS items,
     (SELECT COUNT(*) FROM vocabulary_senses WHERE vocabulary_item_id = ?) AS senses,
     (SELECT COUNT(*) FROM encounters WHERE lookup_event_id = ?) AS encounters`)
-    .bind(userId, first.itemId, lookupEventId)
+    .bind(stableUserId, first.itemId, lookupEventId)
     .first();
 
   assert.equal(Number(row?.items), 1);
@@ -105,7 +127,7 @@ try {
   assert.equal(Number(row?.encounters), 1);
 
   const collectionResponse = await appFetch("/api/collection", {
-    headers: { "oai-authenticated-user-email": userId },
+    headers: authenticatedHeaders,
   });
   assert.equal(collectionResponse.status, 200);
   const collection = await collectionResponse.json();
@@ -113,8 +135,40 @@ try {
   assert.equal(collection.items[0].canonicalForm, "add up");
   assert.equal(collection.items[0].encounteredForm, "doesn't quite add up");
   assert.equal(collection.items[0].sourceTitle, "E2E");
+  assert.equal(collection.items[0].note, "Remember the logic.");
+  assert.equal(collection.items[0].encounters.length, 1);
+  assert.equal(collection.items[0].encounters[0].note, "Remember the logic.");
 
-  console.log("D1 E2E passed: built Worker persisted one item/sense/encounter and repeat save was idempotent.");
+  const otherUserCollection = await appFetch("/api/collection", {
+    headers: {
+      "oai-authenticated-user-id": "other-stable-user",
+      "oai-authenticated-user-email": "other-user@example.com",
+    },
+  });
+  assert.equal(otherUserCollection.status, 200);
+  assert.deepEqual((await otherUserCollection.json()).items, []);
+
+  const forbiddenDelete = await appFetch("/api/collection", {
+    method: "DELETE",
+    headers: { "content-type": "application/json", "oai-authenticated-user-id": "other-stable-user" },
+    body: JSON.stringify({ encounterId: collection.items[0].encounters[0].id }),
+  });
+  assert.equal(forbiddenDelete.status, 404);
+
+  const deleteResponse = await appFetch("/api/collection", {
+    method: "DELETE",
+    headers: { "content-type": "application/json", ...authenticatedHeaders },
+    body: JSON.stringify({ encounterId: collection.items[0].encounters[0].id }),
+  });
+  assert.equal(deleteResponse.status, 200);
+  const cleaned = await database.prepare(`SELECT
+    (SELECT COUNT(*) FROM encounters WHERE vocabulary_item_id = ?) AS encounters,
+    (SELECT COUNT(*) FROM vocabulary_senses WHERE vocabulary_item_id = ?) AS senses,
+    (SELECT COUNT(*) FROM vocabulary_items WHERE id = ?) AS items`)
+    .bind(first.itemId, first.itemId, first.itemId).first();
+  assert.deepEqual([Number(cleaned?.encounters), Number(cleaned?.senses), Number(cleaned?.items)], [0, 0, 0]);
+
+  console.log("D1 E2E passed: encounter notes, ownership, deletion cleanup, and idempotency verified.");
 } finally {
   await miniflare.dispose();
 }

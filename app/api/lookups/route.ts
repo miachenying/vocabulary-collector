@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { completeV2Lookup, failV2Lookup, startV2Lookup } from "@/lib/vocabulary/compatibility";
-import { ensureVocabularySchema, getVocabularyDb } from "@/lib/vocabulary/database";
+import { ensureVocabularySchema, getVocabularyDb, migrateLegacyEmailUserId } from "@/lib/vocabulary/database";
 import { findEntry, findEntryById, mapEntry, updateChineseDefinition, upsertLookupEntry } from "@/lib/vocabulary/entries";
 import { createLookupEvent, deleteLookupEvent, getHistory } from "@/lib/vocabulary/history";
 import { classifyInputV2, normalizeTerm, nullableString } from "@/lib/vocabulary/input";
@@ -8,12 +8,9 @@ import { canonicalizeExpression } from "@/lib/vocabulary/language-judgment";
 import { getVocabularyMeaning } from "@/lib/vocabulary/meaning-provider";
 import { logRequestStage, type TraceContext } from "@/lib/vocabulary/observability";
 import { analyzeSentence, type EnrichedSentenceExpression } from "@/lib/vocabulary/sentence-pipeline";
+import { authenticatedUser, authenticationRequiredBody } from "@/lib/vocabulary/request-user";
 
 export const dynamic = "force-dynamic";
-
-function userId(request: NextRequest) {
-  return request.headers.get("oai-authenticated-user-email") || "mia-local";
-}
 
 function jsonWithTrace(body: unknown, status: number, trace: TraceContext) {
   return NextResponse.json(body, { status, headers: { "x-request-id": trace.requestId } });
@@ -24,7 +21,12 @@ export async function POST(request: NextRequest) {
   const requestStartedAt = Date.now();
   logRequestStage({ trace, stage: "request", outcome: "start" });
 
+  const user = authenticatedUser(request.headers);
+  if (!user) return jsonWithTrace(authenticationRequiredBody(), 401, trace);
+
   await ensureVocabularySchema();
+  const uid = user.userId;
+  await migrateLegacyEmailUserId(getVocabularyDb(), user.email, uid);
   const body = await request.json().catch(() => null) as Record<string, unknown> | null;
   const displayTerm = nullableString(body?.term);
   if (!displayTerm) {
@@ -38,7 +40,6 @@ export async function POST(request: NextRequest) {
   }
 
   const database = getVocabularyDb();
-  const uid = userId(request);
   const now = new Date().toISOString();
   const context = nullableString(body?.context);
   const sourceTitle = nullableString(body?.sourceTitle);
@@ -57,6 +58,7 @@ export async function POST(request: NextRequest) {
       contextSentence: context,
       sourceTitle,
       sourceUrl,
+      note,
       lookedUpAt: now,
     });
     logRequestStage({ trace, stage: "lookup_history_start", outcome: "success", inputType: inputTypeV2 });
@@ -150,6 +152,7 @@ export async function POST(request: NextRequest) {
           contextSentence: context,
           sourceTitle,
           sourceUrl,
+          note,
           lookedUpAt: now,
           lookupEventId: v2LookupEventId,
           canonicalForm,
@@ -186,14 +189,17 @@ export async function POST(request: NextRequest) {
 }
 
 export async function GET(request: NextRequest) {
+  const user = authenticatedUser(request.headers);
+  if (!user) return NextResponse.json(authenticationRequiredBody(), { status: 401 });
   await ensureVocabularySchema();
+  const uid = user.userId;
+  await migrateLegacyEmailUserId(getVocabularyDb(), user.email, uid);
   const start = request.nextUrl.searchParams.get("start");
   const end = request.nextUrl.searchParams.get("end");
   if (!start || !end || Number.isNaN(Date.parse(start)) || Number.isNaN(Date.parse(end))) {
     return NextResponse.json({ error: "Valid start and end dates are required." }, { status: 400 });
   }
 
-  const uid = userId(request);
   const database = getVocabularyDb();
   const rows = await getHistory(database, uid, start, end);
   const totalLookups = rows.results.reduce((sum, row) => sum + Number(row.period_lookup_count || 0), 0);
@@ -207,12 +213,16 @@ export async function GET(request: NextRequest) {
 }
 
 export async function DELETE(request: NextRequest) {
+  const user = authenticatedUser(request.headers);
+  if (!user) return NextResponse.json(authenticationRequiredBody(), { status: 401 });
   await ensureVocabularySchema();
+  const uid = user.userId;
+  await migrateLegacyEmailUserId(getVocabularyDb(), user.email, uid);
   const body = await request.json().catch(() => null) as Record<string, unknown> | null;
   const eventId = nullableString(body?.eventId);
   if (!eventId) return NextResponse.json({ error: "A history record is required." }, { status: 400 });
 
-  const deleted = await deleteLookupEvent(getVocabularyDb(), userId(request), eventId);
+  const deleted = await deleteLookupEvent(getVocabularyDb(), uid, eventId);
   if (!deleted) return NextResponse.json({ error: "History record not found." }, { status: 404 });
   return NextResponse.json({ deleted: true });
 }

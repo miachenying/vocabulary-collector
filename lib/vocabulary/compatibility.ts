@@ -13,6 +13,7 @@ type LookupMetadata = {
   contextSentence: string | null;
   sourceTitle: string | null;
   sourceUrl: string | null;
+  note: string | null;
   lookedUpAt: string;
 };
 
@@ -43,6 +44,7 @@ export async function completeV2Lookup(input: CompleteV2LookupInput) {
     contextSentence,
     sourceTitle,
     sourceUrl,
+    note,
     lookedUpAt,
     lookupEventId,
     canonicalForm,
@@ -103,6 +105,7 @@ export async function completeV2Lookup(input: CompleteV2LookupInput) {
       contextSentence,
       sourceTitle,
       sourceUrl,
+      note,
       encounteredAt: lookedUpAt,
     });
 
