@@ -151,3 +151,19 @@ test("repairs passive met-with boundaries and rejects ordinary time adverbs", ()
     { encounteredForm: "won them over", canonicalForm: "win someone over", reason: "idiom" },
   ]);
 });
+
+test("aligns repaired met-with meaning and filters routine literal actions", () => {
+  const passive = structuredSentenceAnalysisFromPayload({
+    translation: "这项提议遭到了怀疑。",
+    expressions: [{ encountered_form: "met with skepticism", canonical_form: "be met with something", chinese_meaning: "遭遇（某种反应或态度）", reason: "fixed_expression" }],
+  }, "The proposal was met with skepticism.");
+  assert.deepEqual(passive.expressions[0], {
+    encounteredForm: "was met with skepticism", canonicalForm: "be met with skepticism",
+    chineseMeaning: "遭到质疑；受到怀疑", meaningStatus: "ready", reason: "fixed_expression",
+  });
+
+  assert.deepEqual(expressionsFromPayload({ expressions: [
+    { encountered_form: "submitted the report", canonical_form: "submitting something", reason: "contextual_expression" },
+    { encountered_form: "emailed my manager", canonical_form: "email someone", reason: "contextual_expression" },
+  ] }, "I submitted the report and emailed my manager."), []);
+});

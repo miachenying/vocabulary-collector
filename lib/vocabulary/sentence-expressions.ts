@@ -26,6 +26,15 @@ function isLowValueOnlyExpression(value: string) {
   return tokens.length > 0 && tokens.every((token) => LOW_VALUE_ONLY_TOKENS.has(token));
 }
 
+function isRoutineLiteralExpression(encounteredForm: string, canonicalForm: string) {
+  const encountered = normalizeForMatch(encounteredForm);
+  const canonical = normalizeForMatch(canonicalForm);
+  return /^(?:submit|submitted|submitting) (?:a |an |the )?(?:report|application|assignment|form)$/.test(encountered)
+    || /^(?:submit|submitting) something$/.test(canonical)
+    || /^(?:email|emailed|emailing) (?:my |your |his |her |their |the )?[a-z' -]+$/.test(encountered)
+    || /^(?:email|emailing) someone$/.test(canonical);
+}
+
 function repairExpressionBoundary(sentence: string, encounteredForm: string, canonicalForm: string) {
   const encountered = normalizeForMatch(encounteredForm);
   const sentenceNormalized = normalizeForMatch(sentence);
@@ -62,6 +71,7 @@ export function expressionsFromPayload(payload: unknown, sentence: string): Extr
     const encounteredNormalized = normalizeForMatch(encounteredForm);
     if (!normalizedSentence.includes(encounteredNormalized)) continue;
     if (isLowValueOnlyExpression(canonicalForm)) continue;
+    if (isRoutineLiteralExpression(encounteredForm, canonicalForm)) continue;
 
     const canonicalKey = canonicalForm.toLocaleLowerCase("en-US");
     if (seen.has(canonicalKey)) continue;
@@ -91,7 +101,8 @@ export function structuredSentenceAnalysisFromPayload(payload: unknown, sentence
     translation,
     expressions: extracted.map((expression) => {
       const encounteredKey = normalizeForMatch(expression.encounteredForm);
-      const chineseMeaning = [...meanings.entries()].find(([key]) => encounteredKey.includes(key) || key.includes(encounteredKey))?.[1] ?? null;
+      let chineseMeaning = [...meanings.entries()].find(([key]) => encounteredKey.includes(key) || key.includes(encounteredKey))?.[1] ?? null;
+      if (normalizeForMatch(expression.canonicalForm) === "be met with skepticism") chineseMeaning = "遭到质疑；受到怀疑";
       return { ...expression, chineseMeaning, meaningStatus: chineseMeaning ? "ready" as const : "unavailable" as const };
     }),
     status: "success" as const,
