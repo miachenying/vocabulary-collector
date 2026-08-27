@@ -16,6 +16,16 @@ export function getVocabularyDb() {
   return binding;
 }
 
+export async function migrateLegacyEmailUserId(database: Db, email: string | null, stableUserId: string) {
+  if (!email || email === stableUserId) return;
+  await database.batch([
+    database.prepare("UPDATE vocabulary_entries SET user_id = ? WHERE user_id = ?").bind(stableUserId, email),
+    database.prepare("UPDATE lookup_events SET user_id = ? WHERE user_id = ?").bind(stableUserId, email),
+    database.prepare("UPDATE lookup_events_v2 SET user_id = ? WHERE user_id = ?").bind(stableUserId, email),
+    database.prepare("UPDATE vocabulary_items SET user_id = ? WHERE user_id = ?").bind(stableUserId, email),
+  ]);
+}
+
 // Version 6 historically initialized its schema at runtime. During Milestone 2
 // we keep the legacy tables intact and add the v2 model alongside them. This
 // makes the migration additive and keeps the current UI/data-access layer usable.

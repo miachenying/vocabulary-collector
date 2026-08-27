@@ -6,6 +6,7 @@ import {
   canonicalFormFromPayload,
   senseMatchFromPayload,
 } from "../lib/vocabulary/language-judgment-validation.ts";
+import { authenticatedUserId, authenticationRequiredBody } from "../lib/vocabulary/request-user.ts";
 
 test("classifies word, phrase, and sentence inputs", () => {
   assert.equal(classifyInputV2("reluctant"), "word");
@@ -61,4 +62,14 @@ test("sense matching conservatively creates a new sense for malformed or uncerta
     matchType: "new",
     senseId: null,
   });
+});
+
+test("request identity requires a trusted authenticated user header", () => {
+  assert.equal(authenticatedUserId(new Headers()), null);
+  assert.equal(authenticatedUserId(new Headers({ "oai-authenticated-user-email": " Mia@Example.COM " })), "mia@example.com");
+  assert.equal(authenticatedUserId(new Headers({
+    "oai-authenticated-user-id": "stable-user-1",
+    "oai-authenticated-user-email": "mia@example.com",
+  })), "stable-user-1");
+  assert.equal(authenticationRequiredBody().code, "authentication_required");
 });

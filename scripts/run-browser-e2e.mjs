@@ -116,6 +116,20 @@ try {
     });
   });
 
+  const captureQuery = new URLSearchParams({
+    capture: "1",
+    term: "caught off guard",
+    context: "The announcement caught everyone off guard.",
+    sourceTitle: "Captured Article",
+    sourceUrl: "https://example.com/article",
+  });
+  await page.goto(`${baseUrl}/?${captureQuery}`, { waitUntil: "networkidle" });
+  await page.getByText("Captured from your browser", { exact: false }).waitFor();
+  assert.equal(await page.locator("#term").inputValue(), "caught off guard");
+  assert.equal(await page.getByLabel("Original sentence").inputValue(), "The announcement caught everyone off guard.");
+  assert.equal(await page.getByLabel("Source name").inputValue(), "Captured Article");
+  assert.equal(await page.getByLabel("Source URL").inputValue(), "https://example.com/article");
+
   await page.goto(baseUrl, { waitUntil: "networkidle" });
   await page.locator("#term").fill(sentence);
   await page.getByRole("button", { name: "Look up" }).click();
@@ -142,7 +156,7 @@ try {
   await page.getByText("Browser E2E", { exact: true }).waitFor();
   await page.getByText("2 encounters", { exact: true }).waitFor();
 
-  console.log("Browser E2E passed: sentence suggestion saved and the Collection view displayed its review context.");
+  console.log("Browser E2E passed: capture prefill, sentence save, and Collection context were verified.");
 } catch (error) {
   console.error(serverLog);
   throw error;

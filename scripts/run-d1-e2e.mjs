@@ -3,6 +3,11 @@ import { Miniflare } from "miniflare";
 
 const lookupEventId = `e2e-lookup-${Date.now()}`;
 const userId = "e2e@example.com";
+const stableUserId = "e2e-stable-user";
+const authenticatedHeaders = {
+  "oai-authenticated-user-id": stableUserId,
+  "oai-authenticated-user-email": userId,
+};
 
 const miniflare = new Miniflare({
   modules: true,
@@ -38,9 +43,16 @@ async function appFetch(path, init = {}) {
 }
 
 try {
+  const anonymousLookup = await appFetch("/api/lookups?start=2026-08-01&end=2026-08-31");
+  assert.equal(anonymousLookup.status, 401);
+  assert.equal((await anonymousLookup.json()).code, "authentication_required");
+
+  const anonymousCollection = await appFetch("/api/collection");
+  assert.equal(anonymousCollection.status, 401);
+
   // The lookup route initializes both legacy and v2 schema before validating dates.
   const initResponse = await appFetch("/api/lookups?start=bad&end=bad", {
-    headers: { "oai-authenticated-user-email": userId },
+    headers: authenticatedHeaders,
   });
   assert.equal(initResponse.status, 400);
 
@@ -67,7 +79,7 @@ try {
     method: "POST",
     headers: {
       "content-type": "application/json",
-      "oai-authenticated-user-email": userId,
+      ...authenticatedHeaders,
     },
     body: JSON.stringify(body),
   });
@@ -82,7 +94,7 @@ try {
     method: "POST",
     headers: {
       "content-type": "application/json",
-      "oai-authenticated-user-email": userId,
+      ...authenticatedHeaders,
     },
     body: JSON.stringify(body),
   });
@@ -97,7 +109,7 @@ try {
     (SELECT COUNT(*) FROM vocabulary_items WHERE user_id = ? AND canonical_form = 'add up') AS items,
     (SELECT COUNT(*) FROM vocabulary_senses WHERE vocabulary_item_id = ?) AS senses,
     (SELECT COUNT(*) FROM encounters WHERE lookup_event_id = ?) AS encounters`)
-    .bind(userId, first.itemId, lookupEventId)
+    .bind(stableUserId, first.itemId, lookupEventId)
     .first();
 
   assert.equal(Number(row?.items), 1);
@@ -105,7 +117,7 @@ try {
   assert.equal(Number(row?.encounters), 1);
 
   const collectionResponse = await appFetch("/api/collection", {
-    headers: { "oai-authenticated-user-email": userId },
+    headers: authenticatedHeaders,
   });
   assert.equal(collectionResponse.status, 200);
   const collection = await collectionResponse.json();
@@ -114,7 +126,16 @@ try {
   assert.equal(collection.items[0].encounteredForm, "doesn't quite add up");
   assert.equal(collection.items[0].sourceTitle, "E2E");
 
-  console.log("D1 E2E passed: built Worker persisted one item/sense/encounter and repeat save was idempotent.");
+  const otherUserCollection = await appFetch("/api/collection", {
+    headers: {
+      "oai-authenticated-user-id": "other-stable-user",
+      "oai-authenticated-user-email": "other-user@example.com",
+    },
+  });
+  assert.equal(otherUserCollection.status, 200);
+  assert.deepEqual((await otherUserCollection.json()).items, []);
+
+  console.log("D1 E2E passed: authentication, user isolation, persistence, and repeat-save idempotency verified.");
 } finally {
   await miniflare.dispose();
 }

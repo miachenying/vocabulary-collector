@@ -1,23 +1,24 @@
 import { NextRequest, NextResponse } from "next/server";
-import { ensureVocabularySchema, getVocabularyDb } from "@/lib/vocabulary/database";
+import { ensureVocabularySchema, getVocabularyDb, migrateLegacyEmailUserId } from "@/lib/vocabulary/database";
 import { parseManualSentenceSaveInput } from "@/lib/vocabulary/manual-save-input";
 import { saveSentenceSuggestion } from "@/lib/vocabulary/collection-save";
 import { logRequestStage, type TraceContext } from "@/lib/vocabulary/observability";
 import { groupCollectionRows, listCollection } from "@/lib/vocabulary/collection";
+import { authenticatedUser, authenticationRequiredBody } from "@/lib/vocabulary/request-user";
 
 export const dynamic = "force-dynamic";
-
-function userId(request: NextRequest) {
-  return request.headers.get("oai-authenticated-user-email") || "mia-local";
-}
 
 function jsonWithTrace(body: unknown, status: number, trace: TraceContext) {
   return NextResponse.json(body, { status, headers: { "x-request-id": trace.requestId } });
 }
 
 export async function GET(request: NextRequest) {
+  const user = authenticatedUser(request.headers);
+  if (!user) return NextResponse.json(authenticationRequiredBody(), { status: 401 });
   await ensureVocabularySchema();
-  const rows = await listCollection(getVocabularyDb(), userId(request));
+  const uid = user.userId;
+  await migrateLegacyEmailUserId(getVocabularyDb(), user.email, uid);
+  const rows = await listCollection(getVocabularyDb(), uid);
   return NextResponse.json({ items: groupCollectionRows(rows.results) });
 }
 
@@ -26,7 +27,12 @@ export async function POST(request: NextRequest) {
   const startedAt = Date.now();
   logRequestStage({ trace, stage: "request", outcome: "start" });
 
+  const user = authenticatedUser(request.headers);
+  if (!user) return jsonWithTrace(authenticationRequiredBody(), 401, trace);
+
   await ensureVocabularySchema();
+  const uid = user.userId;
+  await migrateLegacyEmailUserId(getVocabularyDb(), user.email, uid);
   const body = await request.json().catch(() => null);
   const suggestion = parseManualSentenceSaveInput(body);
   if (!suggestion) {
@@ -37,7 +43,7 @@ export async function POST(request: NextRequest) {
   try {
     const result = await saveSentenceSuggestion({
       database: getVocabularyDb(),
-      userId: userId(request),
+      userId: uid,
       suggestion,
       now: new Date().toISOString(),
       trace,

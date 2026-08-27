@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, useMemo, useState } from "react";
+import { FormEvent, useEffect, useMemo, useState } from "react";
 
 type Entry = {
   id: string;
@@ -107,6 +107,29 @@ export default function Home() {
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [collection, setCollection] = useState<CollectionItem[]>([]);
   const [collectionLoading, setCollectionLoading] = useState(false);
+  const [capturedFromPage, setCapturedFromPage] = useState(false);
+
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const capturedTerm = params.get("term")?.trim();
+    if (!capturedTerm) return;
+    const timer = window.setTimeout(() => {
+      setTerm(capturedTerm.slice(0, 2000));
+      setContext((params.get("context") ?? "").slice(0, 5000));
+      setSourceTitle((params.get("sourceTitle") ?? "").slice(0, 500));
+      setSourceUrl((params.get("sourceUrl") ?? "").slice(0, 2000));
+      setDetailsOpen(Boolean(params.get("context") || params.get("sourceTitle") || params.get("sourceUrl")));
+      setCapturedFromPage(params.get("capture") === "1");
+    }, 0);
+    return () => window.clearTimeout(timer);
+  }, []);
+
+  function redirectToSignIn(response: Response, payload: { code?: string }) {
+    if (response.status !== 401 || payload.code !== "authentication_required") return false;
+    const returnTo = `${window.location.pathname}${window.location.search}`;
+    window.location.assign(`/signin-with-chatgpt?return_to=${encodeURIComponent(returnTo)}`);
+    return true;
+  }
 
   async function openCollection() {
     setView("collection");
@@ -114,8 +137,9 @@ export default function Home() {
     setMessage(null);
     try {
       const response = await fetch("/api/collection");
+      const payload = await response.json() as { items?: CollectionItem[]; code?: string };
+      if (redirectToSignIn(response, payload)) return;
       if (!response.ok) throw new Error("Could not load collection");
-      const payload = await response.json() as { items?: CollectionItem[] };
       setCollection(payload.items ?? []);
     } catch {
       setMessage("Collection is temporarily unavailable. Please try again.");
@@ -130,8 +154,10 @@ export default function Home() {
       const bounds = toIsoBounds(nextRange.start, nextRange.end);
       const qs = new URLSearchParams(bounds);
       const response = await fetch(`/api/lookups?${qs}`);
+      const payload = await response.json();
+      if (redirectToSignIn(response, payload)) return;
       if (!response.ok) throw new Error("Could not load history");
-      setHistory(await response.json());
+      setHistory(payload);
     } catch {
       setMessage("History is temporarily unavailable. Please try again.");
     } finally {
@@ -160,6 +186,7 @@ export default function Home() {
         body: JSON.stringify({ term, context, sourceTitle, sourceUrl, note }),
       });
       const payload = await response.json();
+      if (redirectToSignIn(response, payload)) return;
       if (!response.ok && !payload.entry) throw new Error(payload.error || "Lookup failed");
       setResult(payload.entry);
       setSentenceAnalysis(payload.sentenceAnalysis ?? null);
@@ -188,6 +215,7 @@ export default function Home() {
         }),
       });
       const payload = await response.json();
+      if (redirectToSignIn(response, payload)) return;
       if (!response.ok) throw new Error(payload.error || "Save failed");
       setSavedCanonicalForms((current) => current.includes(expression.canonicalForm)
         ? current
@@ -215,6 +243,8 @@ export default function Home() {
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ eventId: entry.lastEventId }),
       });
+      const payload = await response.json();
+      if (redirectToSignIn(response, payload)) return;
       if (!response.ok) throw new Error("Delete failed");
       await loadHistory();
     } catch {
@@ -268,6 +298,7 @@ export default function Home() {
           </div>
 
           <div className="lookup-card">
+            {capturedFromPage && <p className="capture-banner">Captured from your browser — review the context, then look it up.</p>}
             <form onSubmit={lookup}>
               <label htmlFor="term">English word, phrase, or sentence</label>
               <div className="lookup-row">

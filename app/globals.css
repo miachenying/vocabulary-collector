@@ -30,6 +30,7 @@ button { cursor: pointer; }
 .lookup-copy h1, .history-heading h1 { margin: 0; font-family: Georgia, "Times New Roman", serif; font-size: clamp(44px, 5vw, 70px); line-height: 1.08; letter-spacing: -.035em; font-weight: 500; }
 .lede { max-width: 460px; margin: 26px 0 0; color: var(--muted); font-size: 18px; line-height: 1.75; }
 .lookup-card { background: var(--card); border: 1px solid var(--line); border-radius: 28px; padding: 34px; box-shadow: 0 24px 70px rgba(47, 53, 48, .08); }
+.capture-banner { margin: 0 0 18px; padding: 10px 12px; border: 1px solid #b7d6c6; border-radius: 10px; background: #edf8f1; color: #285b40; font-size: 13px; line-height: 1.45; }
 .lookup-card label, .date-fields label { color: var(--muted); font-size: 12px; font-weight: 650; }
 .lookup-row { display: flex; gap: 10px; margin-top: 9px; }
 input, textarea { width: 100%; border: 1px solid #cccac2; background: white; color: var(--ink); border-radius: 12px; outline: none; transition: .16s ease; }

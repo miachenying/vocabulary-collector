@@ -1,0 +1,15 @@
+{
+  "manifest_version": 3,
+  "name": "Vocabulary Collector",
+  "version": "3.0.0",
+  "description": "Look up selected English with page context and source.",
+  "permissions": ["contextMenus", "scripting", "tabs"],
+  "host_permissions": ["<all_urls>"],
+  "background": { "service_worker": "service-worker.js" },
+  "commands": {
+    "capture-selection": {
+      "suggested_key": { "default": "Alt+Shift+V", "mac": "Command+Shift+V" },
+      "description": "Look up selected text"
+    }
+  }
+}
