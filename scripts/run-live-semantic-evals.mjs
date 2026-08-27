@@ -67,6 +67,8 @@ function containsAny(value, expected) {
 
 const canonicalAliases = new Map([
   ["be met with skepticism", ["be met with skepticism", "meet with skepticism"]],
+  ["brush off", ["brush off", "brush someone off", "brush something off"]],
+  ["send shock waves through", ["send shock waves through", "send shock waves through someone", "send shock waves through something"]],
 ]);
 
 function canonicalMatches(actualForms, expected) {
