@@ -7,6 +7,7 @@ export type ExtractedExpression = {
 const LOW_VALUE_ONLY_TOKENS = new Set([
   "a", "an", "the", "and", "or", "but", "not", "quite", "very", "really", "just", "even",
   "still", "already", "almost", "rather", "pretty", "much", "too", "so", "more", "most",
+  "eventually", "finally", "ultimately", "currently", "recently", "usually", "often", "sometimes",
 ]);
 
 function normalizeForMatch(value: string) {
@@ -25,6 +26,21 @@ function isLowValueOnlyExpression(value: string) {
   return tokens.length > 0 && tokens.every((token) => LOW_VALUE_ONLY_TOKENS.has(token));
 }
 
+function repairExpressionBoundary(sentence: string, encounteredForm: string, canonicalForm: string) {
+  const encountered = normalizeForMatch(encounteredForm);
+  const sentenceNormalized = normalizeForMatch(sentence);
+  const metMatch = encountered.match(/^(?:(?:was|were|is|are|been|being) )?met with (.+)$/);
+  if (metMatch) {
+    const complement = metMatch[1];
+    const passiveMatch = sentenceNormalized.match(new RegExp(`\\b(?:was|were|is|are|been|being) met with ${complement.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`));
+    return {
+      encounteredForm: passiveMatch?.[0] ?? encounteredForm,
+      canonicalForm: `be met with ${complement}`,
+    };
+  }
+  return { encounteredForm, canonicalForm };
+}
+
 export function expressionsFromPayload(payload: unknown, sentence: string): ExtractedExpression[] {
   const parsed = payload as { expressions?: unknown } | null;
   if (!parsed || !Array.isArray(parsed.expressions)) return [];
@@ -37,9 +53,11 @@ export function expressionsFromPayload(payload: unknown, sentence: string): Extr
     if (output.length >= 3) break;
     if (!candidate || typeof candidate !== "object") continue;
     const row = candidate as Record<string, unknown>;
-    const encounteredForm = typeof row.encountered_form === "string" ? row.encountered_form.trim() : "";
-    const canonicalForm = typeof row.canonical_form === "string" ? row.canonical_form.trim() : "";
+    let encounteredForm = typeof row.encountered_form === "string" ? row.encountered_form.trim() : "";
+    let canonicalForm = typeof row.canonical_form === "string" ? row.canonical_form.trim() : "";
     if (!encounteredForm || !canonicalForm || !isReason(row.reason)) continue;
+
+    ({ encounteredForm, canonicalForm } = repairExpressionBoundary(sentence, encounteredForm, canonicalForm));
 
     const encounteredNormalized = normalizeForMatch(encounteredForm);
     if (!normalizedSentence.includes(encounteredNormalized)) continue;
@@ -65,14 +83,15 @@ export function structuredSentenceAnalysisFromPayload(payload: unknown, sentence
   for (const candidate of rawRows) {
     if (!candidate || typeof candidate !== "object") continue;
     const row = candidate as Record<string, unknown>;
-    if (typeof row.canonical_form !== "string" || typeof row.chinese_meaning !== "string") continue;
+    if (typeof row.encountered_form !== "string" || typeof row.chinese_meaning !== "string") continue;
     const meaning = row.chinese_meaning.trim();
-    if (meaning) meanings.set(row.canonical_form.trim().toLocaleLowerCase("en-US"), meaning);
+    if (meaning) meanings.set(normalizeForMatch(row.encountered_form), meaning);
   }
   return {
     translation,
     expressions: extracted.map((expression) => {
-      const chineseMeaning = meanings.get(expression.canonicalForm.toLocaleLowerCase("en-US")) ?? null;
+      const encounteredKey = normalizeForMatch(expression.encounteredForm);
+      const chineseMeaning = [...meanings.entries()].find(([key]) => encounteredKey.includes(key) || key.includes(encounteredKey))?.[1] ?? null;
       return { ...expression, chineseMeaning, meaningStatus: chineseMeaning ? "ready" as const : "unavailable" as const };
     }),
     status: "success" as const,

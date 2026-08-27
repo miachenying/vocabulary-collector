@@ -46,7 +46,7 @@ type CollectionItem = {
   sourceTitle: string | null;
   sourceUrl: string | null;
   encounteredAt: string;
-  savedAt: string;
+  encounterCount: number;
 };
 
 type HistoryResponse = {
@@ -118,7 +118,7 @@ export default function Home() {
       const payload = await response.json() as { items?: CollectionItem[] };
       setCollection(payload.items ?? []);
     } catch {
-      setMessage("Collection 暂时无法读取，请稍后重试。");
+      setMessage("Collection is temporarily unavailable. Please try again.");
     } finally {
       setCollectionLoading(false);
     }
@@ -133,7 +133,7 @@ export default function Home() {
       if (!response.ok) throw new Error("Could not load history");
       setHistory(await response.json());
     } catch {
-      setMessage("History 暂时无法读取，请稍后重试。");
+      setMessage("History is temporarily unavailable. Please try again.");
     } finally {
       setHistoryLoading(false);
     }
@@ -166,7 +166,7 @@ export default function Home() {
       if (payload.warning) setMessage(payload.warning);
       setTerm("");
     } catch {
-      setMessage("这次查询没有完成。原词会在服务可用后再保存，请重试一次。");
+      setMessage("This lookup could not be completed. Please try again.");
     } finally {
       setLoading(false);
     }
@@ -193,7 +193,7 @@ export default function Home() {
         ? current
         : [...current, expression.canonicalForm]);
     } catch {
-      setMessage("这个表达暂时没有保存成功，请稍后重试。");
+      setMessage("This expression could not be saved. Please try again.");
     } finally {
       setSavingCanonical(null);
     }
@@ -218,7 +218,7 @@ export default function Home() {
       if (!response.ok) throw new Error("Delete failed");
       await loadHistory();
     } catch {
-      setMessage("这条记录暂时无法删除，请稍后重试。");
+      setMessage("This history record could not be deleted. Please try again.");
     } finally {
       setDeletingId(null);
     }
@@ -263,8 +263,8 @@ export default function Home() {
         <section className="lookup-layout">
           <div className="lookup-copy">
             <p className="eyebrow">YOUR REAL-LIFE VOCABULARY</p>
-            <h1>遇到一个词，<br />现在就收下来。</h1>
-            <p className="lede">查中文意思的同时自动保存。下次再遇到它，我们会记得。</p>
+            <h1>Look it up.<br />Make it yours.</h1>
+            <p className="lede">Turn the English you encounter into a vocabulary collection built from real context.</p>
           </div>
 
           <div className="lookup-card">
@@ -290,7 +290,7 @@ export default function Home() {
 
             {result && (
               <article className="result-card" aria-live="polite">
-                <div><p className="result-term">{result.displayTerm}</p><p className="definition">{result.chineseDefinition || "解释待生成"}</p></div>
+                <div><p className="result-term">{result.displayTerm}</p><p className="definition">{result.chineseDefinition || "Meaning unavailable"}</p></div>
                 <span className="count-pill">{result.lookupCount === 1 ? "New" : `${result.lookupCount}× looked up`}</span>
               </article>
             )}
@@ -298,11 +298,11 @@ export default function Home() {
             {sentenceAnalysis && (
               <section className="sentence-suggestions" aria-live="polite">
                 <div className="sentence-suggestions-heading">
-                  <div><p>USEFUL EXPRESSIONS</p><h2>值得收下来的表达</h2></div>
+                  <div><p>USEFUL EXPRESSIONS</p><h2>Expressions worth keeping</h2></div>
                   <span>{sentenceAnalysis.expressions.length}</span>
                 </div>
                 {sentenceAnalysis.expressions.length === 0 ? (
-                  <p className="sentence-empty">{sentenceAnalysis.status === "degraded" ? "表达分析暂时不可用，请稍后重试。" : "这句话里没有特别值得单独保存的表达。"}</p>
+                  <p className="sentence-empty">{sentenceAnalysis.status === "degraded" ? "Expression analysis is temporarily unavailable." : "No reusable expressions found in this sentence."}</p>
                 ) : (
                   <div className="expression-list">
                     {sentenceAnalysis.expressions.map((expression) => {
@@ -314,7 +314,7 @@ export default function Home() {
                           <div>
                             <strong>{expression.encounteredForm}</strong>
                             {expression.canonicalForm !== expression.encounteredForm && <small>{expression.canonicalForm}</small>}
-                            <p>{expression.chineseMeaning || "中文意思暂时不可用"}</p>
+                            <p>{expression.chineseMeaning || "Meaning temporarily unavailable"}</p>
                           </div>
                           <button
                             type="button"
@@ -337,25 +337,25 @@ export default function Home() {
       ) : view === "collection" ? (
         <section className="history-layout collection-layout">
           <div className="history-heading">
-            <div><p className="eyebrow">YOUR COLLECTION</p><h1>收下来的词，<br />随时回来复习。</h1></div>
+            <div><p className="eyebrow">YOUR COLLECTION</p><h1>Your vocabulary,<br />ready to revisit.</h1></div>
             <p>{collection.length} saved</p>
           </div>
-          <p className="collection-intro">这里是你主动保存的学习内容；查询记录仍单独保留在 History。</p>
+          <p className="collection-intro">The words and expressions you chose to keep. Lookup activity stays in History.</p>
           <div className="history-list collection-list" aria-live="polite">
             {collectionLoading ? <p className="empty">Loading collection…</p> : collection.length === 0 ? (
-              <p className="empty">还没有收藏。查词或从句子建议中 Save 后，会显示在这里。</p>
+              <p className="empty">Nothing saved yet. Look up a word or save an expression to start your collection.</p>
             ) : collection.map((item) => (
               <article className="history-item collection-item" key={item.id}>
                 <div className="item-main">
                   <div className="term-line"><h2>{item.canonicalForm}</h2><span className="repeat-badge">{item.itemType}</span></div>
                   <p>{item.chineseMeaning}</p>
-                  {item.encounteredForm !== item.canonicalForm && <small>遇见时：{item.encounteredForm}</small>}
+                  {item.encounteredForm !== item.canonicalForm && <small>Encountered as: {item.encounteredForm}</small>}
                   {item.contextSentence && <blockquote>“{item.contextSentence}”</blockquote>}
-                  {(item.sourceTitle || item.sourceUrl) && <small>来源：{item.sourceUrl ? <a href={item.sourceUrl} target="_blank" rel="noreferrer">{item.sourceTitle || item.sourceUrl}</a> : item.sourceTitle}</small>}
+                  {(item.sourceTitle || item.sourceUrl) && <small>Source: {item.sourceUrl ? <a href={item.sourceUrl} target="_blank" rel="noreferrer">{item.sourceTitle || item.sourceUrl}</a> : item.sourceTitle}</small>}
                 </div>
                 <div className="collection-times">
-                  <time>保存于 {new Date(item.savedAt).toLocaleString([], { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}</time>
-                  <time>遇见于 {new Date(item.encounteredAt).toLocaleString([], { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}</time>
+                  <span className="encounter-count">{item.encounterCount} {item.encounterCount === 1 ? "encounter" : "encounters"}</span>
+                  <time>Last seen {new Date(item.encounteredAt).toLocaleString([], { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}</time>
                 </div>
               </article>
             ))}
@@ -365,7 +365,7 @@ export default function Home() {
       ) : (
         <section className="history-layout">
           <div className="history-heading">
-            <div><p className="eyebrow">VOCABULARY HISTORY</p><h1>你真正遇到过的词。</h1></div>
+            <div><p className="eyebrow">VOCABULARY HISTORY</p><h1>Every lookup,<br />in one place.</h1></div>
             <p>{rangeLabel}</p>
           </div>
 
@@ -407,12 +407,12 @@ export default function Home() {
 
           <div className="history-list" aria-live="polite">
             {historyLoading ? <p className="empty">Loading history…</p> : visibleEntries.length === 0 ? (
-              <p className="empty">这个筛选条件下还没有记录。</p>
+              <p className="empty">No lookups match these filters.</p>
             ) : visibleEntries.map((entry) => (
               <article className="history-item" key={entry.id}>
                 <div className="item-main">
                   <div className="term-line"><h2>{entry.displayTerm}</h2>{entry.lookupCount > 1 && <span className="repeat-badge">{entry.lookupCount}×</span>}</div>
-                  <p>{entry.chineseDefinition || "解释待生成"}</p>
+                  <p>{entry.chineseDefinition || "Meaning unavailable"}</p>
                   {entry.contextSentence && <blockquote>“{entry.contextSentence}”</blockquote>}
                   {(entry.sourceTitle || entry.note) && <small>{[entry.sourceTitle, entry.note].filter(Boolean).join(" · ")}</small>}
                 </div>

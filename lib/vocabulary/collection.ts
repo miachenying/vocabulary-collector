@@ -33,16 +33,20 @@ export function groupCollectionRows(rows: CollectionRow[]) {
   const items = new Map<string, {
     id: string; canonicalForm: string; itemType: "word" | "phrase"; createdAt: string;
     chineseMeaning: string; encounteredForm: string; contextSentence: string | null;
-    sourceTitle: string | null; sourceUrl: string | null; encounteredAt: string; savedAt: string;
+    sourceTitle: string | null; sourceUrl: string | null; encounteredAt: string; encounterCount: number;
   }>();
   for (const row of rows) {
     const key = `${row.item_id}:${row.sense_id}`;
-    if (items.has(key)) continue;
+    const existing = items.get(key);
+    if (existing) {
+      existing.encounterCount += 1;
+      continue;
+    }
     items.set(key, {
       id: key, canonicalForm: row.canonical_form, itemType: row.item_type, createdAt: row.item_created_at,
       chineseMeaning: row.chinese_meaning, encounteredForm: row.encountered_form,
       contextSentence: row.context_sentence, sourceTitle: row.source_title, sourceUrl: row.source_url,
-      encounteredAt: row.encountered_at, savedAt: row.saved_at,
+      encounteredAt: row.encountered_at, encounterCount: 1,
     });
   }
   return [...items.values()];

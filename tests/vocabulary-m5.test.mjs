@@ -54,6 +54,21 @@ test("collection rows expose saved vocabulary separately from lookup history", (
     createdAt: "2026-08-26T18:00:00.000Z", chineseMeaning: "说服某人；赢得某人的支持",
     encounteredForm: "won them over", contextSentence: "She eventually won them over.",
     sourceTitle: "Article", sourceUrl: "https://example.com", encounteredAt: "2026-08-26T18:00:00.000Z",
-    savedAt: "2026-08-26T18:01:00.000Z",
+    encounterCount: 1,
   });
+});
+
+test("collection groups repeated encounters and keeps the latest context", () => {
+  const base = {
+    item_id: "item-1", canonical_form: "add up", item_type: "phrase", item_created_at: "2026-08-25T18:00:00.000Z",
+    sense_id: "sense-1", chinese_meaning: "说得通", encountered_form: "added up", context_sentence: null,
+    source_title: null, source_url: null, saved_at: "2026-08-27T18:00:00.000Z",
+  };
+  const items = groupCollectionRows([
+    { ...base, encountered_at: "2026-08-27T18:00:00.000Z" },
+    { ...base, encountered_form: "add up", encountered_at: "2026-08-26T18:00:00.000Z" },
+  ]);
+  assert.equal(items[0].encounterCount, 2);
+  assert.equal(items[0].encounteredAt, "2026-08-27T18:00:00.000Z");
+  assert.equal(items[0].encounteredForm, "added up");
 });

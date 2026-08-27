@@ -97,7 +97,7 @@ try {
           createdAt: "2026-08-26T18:00:00.000Z", chineseMeaning: "说得通；合乎情理",
           encounteredForm: "doesn't quite add up", contextSentence: sentence,
           sourceTitle: "Browser E2E", sourceUrl: "https://example.com/browser",
-          encounteredAt: "2026-08-26T18:00:00.000Z", savedAt: "2026-08-26T18:01:00.000Z",
+          encounteredAt: "2026-08-26T18:00:00.000Z", encounterCount: 2,
         }] }),
       });
     }
@@ -120,7 +120,7 @@ try {
   await page.locator("#term").fill(sentence);
   await page.getByRole("button", { name: "Look up" }).click();
 
-  await page.getByRole("heading", { name: "值得收下来的表达" }).waitFor();
+  await page.getByRole("heading", { name: "Expressions worth keeping" }).waitFor();
   await page.getByText("doesn't quite add up", { exact: true }).waitFor();
   await page.getByText("说得通；合乎情理", { exact: true }).waitFor();
 
@@ -138,8 +138,9 @@ try {
 
   await page.getByRole("button", { name: "Collection", exact: true }).click();
   await page.getByRole("heading", { name: "add up", exact: true }).waitFor();
-  await page.getByText("遇见时：doesn't quite add up", { exact: true }).waitFor();
+  await page.getByText("Encountered as: doesn't quite add up", { exact: true }).waitFor();
   await page.getByText("Browser E2E", { exact: true }).waitFor();
+  await page.getByText("2 encounters", { exact: true }).waitFor();
 
   console.log("Browser E2E passed: sentence suggestion saved and the Collection view displayed its review context.");
 } catch (error) {

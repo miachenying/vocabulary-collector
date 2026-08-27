@@ -138,3 +138,16 @@ test("structured analysis keeps expression boundaries, reusable forms, and meani
   ]);
   assert.equal(result.expressions[1].chineseMeaning.includes("业内"), false);
 });
+
+test("repairs passive met-with boundaries and rejects ordinary time adverbs", () => {
+  const sentence = "The proposal was met with skepticism, but she eventually won them over.";
+  const expressions = expressionsFromPayload({ expressions: [
+    { encountered_form: "met with skepticism", canonical_form: "be met with something", reason: "fixed_expression" },
+    { encountered_form: "eventually", canonical_form: "eventually", reason: "contextual_expression" },
+    { encountered_form: "won them over", canonical_form: "win someone over", reason: "idiom" },
+  ] }, sentence);
+  assert.deepEqual(expressions, [
+    { encounteredForm: "was met with skepticism", canonicalForm: "be met with skepticism", reason: "fixed_expression" },
+    { encounteredForm: "won them over", canonicalForm: "win someone over", reason: "idiom" },
+  ]);
+});
