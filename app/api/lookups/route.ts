@@ -7,7 +7,7 @@ import { classifyInputV2, normalizeTerm, nullableString } from "@/lib/vocabulary
 import { canonicalizeExpression } from "@/lib/vocabulary/language-judgment";
 import { getVocabularyMeaning } from "@/lib/vocabulary/meaning-provider";
 import { logRequestStage, type TraceContext } from "@/lib/vocabulary/observability";
-import { enrichSentenceExpressions, extractSentenceExpressions, type EnrichedSentenceExpression } from "@/lib/vocabulary/sentence-pipeline";
+import { analyzeSentence, type EnrichedSentenceExpression } from "@/lib/vocabulary/sentence-pipeline";
 
 export const dynamic = "force-dynamic";
 
@@ -98,7 +98,28 @@ export async function POST(request: NextRequest) {
   let sentenceExpressions: EnrichedSentenceExpression[] = [];
   let sentenceAnalysisDegraded = false;
   const isMultiWord = /\s/.test(displayTerm.trim());
-  if (!definition || context || isMultiWord) {
+  if (inputTypeV2 === "sentence") {
+    const sentenceStartedAt = Date.now();
+    const analysis = await analyzeSentence(displayTerm, trace);
+    if (analysis.status === "success") {
+      definition = analysis.translation;
+      sentenceExpressions = analysis.expressions;
+      sentenceAnalysisDegraded = sentenceExpressions.some((expression) => expression.meaningStatus === "unavailable");
+      await updateChineseDefinition(database, entryId, definition);
+      logRequestStage({ trace, stage: "meaning", outcome: "success", durationMs: Date.now() - sentenceStartedAt, inputType: inputTypeV2, provider: "gemini" });
+    } else {
+      sentenceAnalysisDegraded = true;
+      try {
+        const meaning = await getVocabularyMeaning(displayTerm, inputTypeV2, context, trace);
+        definition = meaning.chineseMeaning;
+        await updateChineseDefinition(database, entryId, definition);
+        logRequestStage({ trace, stage: "meaning_fallback", outcome: "partial", durationMs: Date.now() - sentenceStartedAt, inputType: inputTypeV2, provider: meaning.provider });
+      } catch (error) {
+        console.error("Sentence meaning fallback failed", error);
+        warning = "词已经保存，但这次中文解释暂时没有生成。请稍后再查一次。";
+      }
+    }
+  } else if (!definition || context || isMultiWord) {
     const meaningStartedAt = Date.now();
     try {
       const meaning = await getVocabularyMeaning(displayTerm, inputTypeV2, context, trace);
@@ -112,21 +133,6 @@ export async function POST(request: NextRequest) {
     }
   } else {
     logRequestStage({ trace, stage: "meaning", outcome: "success", inputType: inputTypeV2, provider: "stored" });
-  }
-
-  if (inputTypeV2 === "sentence" && definition && !warning) {
-    const sentenceStartedAt = Date.now();
-    const extraction = await extractSentenceExpressions(displayTerm, trace);
-    sentenceExpressions = await enrichSentenceExpressions(displayTerm, extraction.expressions, trace);
-    sentenceAnalysisDegraded = extraction.status === "failed"
-      || sentenceExpressions.some((expression) => expression.meaningStatus === "unavailable");
-    logRequestStage({
-      trace,
-      stage: "sentence_analysis",
-      outcome: sentenceAnalysisDegraded ? "partial" : "success",
-      durationMs: Date.now() - sentenceStartedAt,
-      inputType: inputTypeV2,
-    });
   }
 
   if (v2LookupEventId) {
@@ -174,7 +180,7 @@ export async function POST(request: NextRequest) {
     warning,
     requestId: trace.requestId,
     sentenceAnalysis: inputTypeV2 === "sentence" && definition
-      ? { lookupEventId: v2LookupEventId, translation: definition, expressions: sentenceExpressions }
+      ? { lookupEventId: v2LookupEventId, translation: definition, expressions: sentenceExpressions, status: sentenceAnalysisDegraded ? "degraded" : "ready" }
       : null,
   }, status, trace);
 }

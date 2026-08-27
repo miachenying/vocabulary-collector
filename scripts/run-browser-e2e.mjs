@@ -88,6 +88,19 @@ try {
   });
 
   await page.route("**/api/collection", async (route) => {
+    if (route.request().method() === "GET") {
+      return route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({ items: [{
+          id: "browser-item:browser-sense", canonicalForm: "add up", itemType: "phrase",
+          createdAt: "2026-08-26T18:00:00.000Z", chineseMeaning: "说得通；合乎情理",
+          encounteredForm: "doesn't quite add up", contextSentence: sentence,
+          sourceTitle: "Browser E2E", sourceUrl: "https://example.com/browser",
+          encounteredAt: "2026-08-26T18:00:00.000Z", savedAt: "2026-08-26T18:01:00.000Z",
+        }] }),
+      });
+    }
     savedPayload = route.request().postDataJSON();
     await route.fulfill({
       status: 200,
@@ -123,7 +136,12 @@ try {
   });
   assert.equal(await page.getByRole("button", { name: "Saved", exact: true }).isDisabled(), true);
 
-  console.log("Browser E2E passed: sentence suggestion rendered, Save was sent, and UI transitioned to Saved.");
+  await page.getByRole("button", { name: "Collection", exact: true }).click();
+  await page.getByRole("heading", { name: "add up", exact: true }).waitFor();
+  await page.getByText("遇见时：doesn't quite add up", { exact: true }).waitFor();
+  await page.getByText("Browser E2E", { exact: true }).waitFor();
+
+  console.log("Browser E2E passed: sentence suggestion saved and the Collection view displayed its review context.");
 } catch (error) {
   console.error(serverLog);
   throw error;

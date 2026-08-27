@@ -32,6 +32,21 @@ type SentenceAnalysis = {
   lookupEventId: string | null;
   translation: string;
   expressions: SentenceExpression[];
+  status?: "ready" | "degraded";
+};
+
+type CollectionItem = {
+  id: string;
+  canonicalForm: string;
+  itemType: "word" | "phrase";
+  createdAt: string;
+  chineseMeaning: string;
+  encounteredForm: string;
+  contextSentence: string | null;
+  sourceTitle: string | null;
+  sourceUrl: string | null;
+  encounteredAt: string;
+  savedAt: string;
 };
 
 type HistoryResponse = {
@@ -71,7 +86,7 @@ function toIsoBounds(start: string, end: string) {
 
 export default function Home() {
   const today = rangeFor("today");
-  const [view, setView] = useState<"lookup" | "history">("lookup");
+  const [view, setView] = useState<"lookup" | "collection" | "history">("lookup");
   const [term, setTerm] = useState("");
   const [context, setContext] = useState("");
   const [sourceTitle, setSourceTitle] = useState("");
@@ -90,6 +105,24 @@ export default function Home() {
   const [historyType, setHistoryType] = useState<"all" | "vocabulary" | "sentence">("all");
   const [sortBy, setSortBy] = useState<"newest" | "oldest" | "az" | "most">("newest");
   const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [collection, setCollection] = useState<CollectionItem[]>([]);
+  const [collectionLoading, setCollectionLoading] = useState(false);
+
+  async function openCollection() {
+    setView("collection");
+    setCollectionLoading(true);
+    setMessage(null);
+    try {
+      const response = await fetch("/api/collection");
+      if (!response.ok) throw new Error("Could not load collection");
+      const payload = await response.json() as { items?: CollectionItem[] };
+      setCollection(payload.items ?? []);
+    } catch {
+      setMessage("Collection 暂时无法读取，请稍后重试。");
+    } finally {
+      setCollectionLoading(false);
+    }
+  }
 
   async function loadHistory(nextRange = range) {
     setHistoryLoading(true);
@@ -221,6 +254,7 @@ export default function Home() {
         </button>
         <nav className="nav-tabs" aria-label="Primary navigation">
           <button className={view === "lookup" ? "active" : ""} onClick={() => setView("lookup")}>Lookup</button>
+          <button className={view === "collection" ? "active" : ""} onClick={() => void openCollection()}>Collection</button>
           <button className={view === "history" ? "active" : ""} onClick={openHistory}>History</button>
         </nav>
       </header>
@@ -268,7 +302,7 @@ export default function Home() {
                   <span>{sentenceAnalysis.expressions.length}</span>
                 </div>
                 {sentenceAnalysis.expressions.length === 0 ? (
-                  <p className="sentence-empty">这句话里没有特别值得单独保存的表达。</p>
+                  <p className="sentence-empty">{sentenceAnalysis.status === "degraded" ? "表达分析暂时不可用，请稍后重试。" : "这句话里没有特别值得单独保存的表达。"}</p>
                 ) : (
                   <div className="expression-list">
                     {sentenceAnalysis.expressions.map((expression) => {
@@ -299,6 +333,34 @@ export default function Home() {
             )}
             {message && <p className="message" role="status">{message}</p>}
           </div>
+        </section>
+      ) : view === "collection" ? (
+        <section className="history-layout collection-layout">
+          <div className="history-heading">
+            <div><p className="eyebrow">YOUR COLLECTION</p><h1>收下来的词，<br />随时回来复习。</h1></div>
+            <p>{collection.length} saved</p>
+          </div>
+          <p className="collection-intro">这里是你主动保存的学习内容；查询记录仍单独保留在 History。</p>
+          <div className="history-list collection-list" aria-live="polite">
+            {collectionLoading ? <p className="empty">Loading collection…</p> : collection.length === 0 ? (
+              <p className="empty">还没有收藏。查词或从句子建议中 Save 后，会显示在这里。</p>
+            ) : collection.map((item) => (
+              <article className="history-item collection-item" key={item.id}>
+                <div className="item-main">
+                  <div className="term-line"><h2>{item.canonicalForm}</h2><span className="repeat-badge">{item.itemType}</span></div>
+                  <p>{item.chineseMeaning}</p>
+                  {item.encounteredForm !== item.canonicalForm && <small>遇见时：{item.encounteredForm}</small>}
+                  {item.contextSentence && <blockquote>“{item.contextSentence}”</blockquote>}
+                  {(item.sourceTitle || item.sourceUrl) && <small>来源：{item.sourceUrl ? <a href={item.sourceUrl} target="_blank" rel="noreferrer">{item.sourceTitle || item.sourceUrl}</a> : item.sourceTitle}</small>}
+                </div>
+                <div className="collection-times">
+                  <time>保存于 {new Date(item.savedAt).toLocaleString([], { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}</time>
+                  <time>遇见于 {new Date(item.encounteredAt).toLocaleString([], { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}</time>
+                </div>
+              </article>
+            ))}
+          </div>
+          {message && <p className="message" role="status">{message}</p>}
         </section>
       ) : (
         <section className="history-layout">

@@ -54,3 +54,27 @@ export function expressionsFromPayload(payload: unknown, sentence: string): Extr
 
   return output;
 }
+
+export function structuredSentenceAnalysisFromPayload(payload: unknown, sentence: string) {
+  const parsed = payload as { translation?: unknown; expressions?: unknown } | null;
+  const translation = typeof parsed?.translation === "string" ? parsed.translation.trim() : "";
+  if (!translation) return { translation: "", expressions: [], status: "failed" as const };
+  const extracted = expressionsFromPayload({ expressions: parsed?.expressions }, sentence);
+  const rawRows = Array.isArray(parsed?.expressions) ? parsed.expressions : [];
+  const meanings = new Map<string, string>();
+  for (const candidate of rawRows) {
+    if (!candidate || typeof candidate !== "object") continue;
+    const row = candidate as Record<string, unknown>;
+    if (typeof row.canonical_form !== "string" || typeof row.chinese_meaning !== "string") continue;
+    const meaning = row.chinese_meaning.trim();
+    if (meaning) meanings.set(row.canonical_form.trim().toLocaleLowerCase("en-US"), meaning);
+  }
+  return {
+    translation,
+    expressions: extracted.map((expression) => {
+      const chineseMeaning = meanings.get(expression.canonicalForm.toLocaleLowerCase("en-US")) ?? null;
+      return { ...expression, chineseMeaning, meaningStatus: chineseMeaning ? "ready" as const : "unavailable" as const };
+    }),
+    status: "success" as const,
+  };
+}

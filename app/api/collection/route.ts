@@ -3,6 +3,7 @@ import { ensureVocabularySchema, getVocabularyDb } from "@/lib/vocabulary/databa
 import { parseManualSentenceSaveInput } from "@/lib/vocabulary/manual-save-input";
 import { saveSentenceSuggestion } from "@/lib/vocabulary/collection-save";
 import { logRequestStage, type TraceContext } from "@/lib/vocabulary/observability";
+import { groupCollectionRows, listCollection } from "@/lib/vocabulary/collection";
 
 export const dynamic = "force-dynamic";
 
@@ -12,6 +13,12 @@ function userId(request: NextRequest) {
 
 function jsonWithTrace(body: unknown, status: number, trace: TraceContext) {
   return NextResponse.json(body, { status, headers: { "x-request-id": trace.requestId } });
+}
+
+export async function GET(request: NextRequest) {
+  await ensureVocabularySchema();
+  const rows = await listCollection(getVocabularyDb(), userId(request));
+  return NextResponse.json({ items: groupCollectionRows(rows.results) });
 }
 
 export async function POST(request: NextRequest) {

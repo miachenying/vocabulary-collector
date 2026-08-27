@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { DICTIONARY_TIMEOUT_MS, dictionaryRequestInit } from "../lib/vocabulary/provider-timeout.ts";
 import { buildExternalAttemptEvent, buildRequestStageEvent } from "../lib/vocabulary/observability.ts";
 import { isRetryableHttpStatus, retryDelayMs, withRetry } from "../lib/vocabulary/retry.ts";
 
@@ -101,4 +102,11 @@ test("external-call events carry the request trace id", () => {
   assert.equal(event.request_id, "req-456");
   assert.equal(event.flow, "lookup");
   assert.equal(event.attempt, 2);
+});
+
+test("dictionary calls use a short abortable latency budget", () => {
+  const init = dictionaryRequestInit();
+  assert.equal(DICTIONARY_TIMEOUT_MS, 3500);
+  assert.ok(init.signal instanceof AbortSignal);
+  assert.equal(init.signal.aborted, false);
 });

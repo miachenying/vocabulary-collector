@@ -1,7 +1,7 @@
 import { generateLanguageJson } from "./language-judgment";
 import { getVocabularyMeaning } from "./meaning-provider";
 import { logRequestStage, type TraceContext } from "./observability";
-import { expressionsFromPayload, type ExtractedExpression } from "./sentence-expressions";
+import { expressionsFromPayload, structuredSentenceAnalysisFromPayload, type ExtractedExpression } from "./sentence-expressions";
 import { enrichSentenceExpressionsWith, type EnrichedSentenceExpression } from "./sentence-enrichment";
 
 export type { ExtractedExpression } from "./sentence-expressions";
@@ -11,6 +11,31 @@ export type SentenceExtractionResult = {
   expressions: ExtractedExpression[];
   status: "success" | "failed";
 };
+
+export type StructuredSentenceAnalysis = {
+  translation: string;
+  expressions: EnrichedSentenceExpression[];
+  status: "success" | "failed";
+};
+
+export async function analyzeSentence(sentence: string, trace?: TraceContext | null): Promise<StructuredSentenceAnalysis> {
+  const prompt = `Task: Analyze this entire English sentence for a Chinese-speaking vocabulary learner in one response.\n
+Sentence: ${sentence}\n
+Return a natural Simplified Chinese translation of the whole sentence and up to 3 genuinely useful reusable expressions.\n
+Expression rules:\n- encountered_form must be the complete contiguous wording appearing verbatim in the sentence, including particles, objects, or complements needed to make its contextual meaning self-contained.\n- canonical_form must be reusable dictionary style. Preserve passive constructions when semantically required (for example, \"was met with skepticism\" becomes \"be met with skepticism\"). Replace context-specific objects with placeholders when the construction requires them (for example, \"sent shock waves through the industry\" becomes \"send shock waves through something\", and \"won them over\" becomes \"win someone over\").\n- chinese_meaning must explain only the canonical expression. Use placeholders such as “某人” or “……” instead of importing context outside the expression boundary.\n- Prefer idioms, phrasal verbs, and fixed/non-obvious expressions. Skip routine literal collocations and modifier fragments. Zero expressions is valid.\n- Never return more than 3 expressions.\n
+Return exactly this shape:\n{"translation":"...","expressions":[{"encountered_form":"...","canonical_form":"...","chinese_meaning":"...","reason":"idiom|phrasal_verb|fixed_expression|contextual_expression"}]}`;
+  const startedAt = Date.now();
+  try {
+    const result = structuredSentenceAnalysisFromPayload(await generateLanguageJson(prompt, 700, trace), sentence);
+    if (result.status === "failed") throw new Error("Structured sentence analysis omitted its translation.");
+    if (trace) logRequestStage({ trace, stage: "sentence_structured_analysis", outcome: result.expressions.some((row) => row.meaningStatus === "unavailable") ? "partial" : "success", durationMs: Date.now() - startedAt, inputType: "sentence", provider: "gemini" });
+    return result;
+  } catch (error) {
+    console.error("Structured sentence analysis failed", error);
+    if (trace) logRequestStage({ trace, stage: "sentence_structured_analysis", outcome: "failure", durationMs: Date.now() - startedAt, inputType: "sentence", provider: "gemini", errorName: error instanceof Error ? error.name : "UnknownError" });
+    return { translation: "", expressions: [], status: "failed" };
+  }
+}
 
 export async function extractSentenceExpressions(
   sentence: string,

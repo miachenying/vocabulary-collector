@@ -104,6 +104,16 @@ try {
   assert.equal(Number(row?.senses), 1);
   assert.equal(Number(row?.encounters), 1);
 
+  const collectionResponse = await appFetch("/api/collection", {
+    headers: { "oai-authenticated-user-email": userId },
+  });
+  assert.equal(collectionResponse.status, 200);
+  const collection = await collectionResponse.json();
+  assert.equal(collection.items.length, 1);
+  assert.equal(collection.items[0].canonicalForm, "add up");
+  assert.equal(collection.items[0].encounteredForm, "doesn't quite add up");
+  assert.equal(collection.items[0].sourceTitle, "E2E");
+
   console.log("D1 E2E passed: built Worker persisted one item/sense/encounter and repeat save was idempotent.");
 } finally {
   await miniflare.dispose();

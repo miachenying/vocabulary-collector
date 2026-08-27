@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { enrichSentenceExpressionsWith } from "../lib/vocabulary/sentence-enrichment.ts";
+import { structuredSentenceAnalysisFromPayload } from "../lib/vocabulary/sentence-expressions.ts";
 import { expressionsFromPayload } from "../lib/vocabulary/sentence-expressions.ts";
 
 test("keeps up to three valid reusable expressions from the sentence", () => {
@@ -116,4 +117,24 @@ test("blank provider output is treated as unavailable", async () => {
   const enriched = await enrichSentenceExpressionsWith(expressions, "It doesn't add up.", async () => "   ");
   assert.equal(enriched[0].chineseMeaning, null);
   assert.equal(enriched[0].meaningStatus, "unavailable");
+});
+
+test("structured analysis keeps expression boundaries, reusable forms, and meanings aligned", () => {
+  const sentence = "The proposal was met with skepticism, the news sent shock waves through the industry, but she eventually won them over.";
+  const result = structuredSentenceAnalysisFromPayload({
+    translation: "该提议遭到质疑，消息震动了整个行业，但她最终说服了他们。",
+    expressions: [
+      { encountered_form: "was met with skepticism", canonical_form: "be met with skepticism", chinese_meaning: "遭到质疑；受到怀疑", reason: "fixed_expression" },
+      { encountered_form: "sent shock waves through the industry", canonical_form: "send shock waves through something", chinese_meaning: "在……中引起巨大震动或强烈反响", reason: "fixed_expression" },
+      { encountered_form: "won them over", canonical_form: "win someone over", chinese_meaning: "说服某人；赢得某人的支持", reason: "idiom" },
+    ],
+  }, sentence);
+
+  assert.equal(result.status, "success");
+  assert.deepEqual(result.expressions.map(({ encounteredForm, canonicalForm, chineseMeaning }) => ({ encounteredForm, canonicalForm, chineseMeaning })), [
+    { encounteredForm: "was met with skepticism", canonicalForm: "be met with skepticism", chineseMeaning: "遭到质疑；受到怀疑" },
+    { encounteredForm: "sent shock waves through the industry", canonicalForm: "send shock waves through something", chineseMeaning: "在……中引起巨大震动或强烈反响" },
+    { encounteredForm: "won them over", canonicalForm: "win someone over", chineseMeaning: "说服某人；赢得某人的支持" },
+  ]);
+  assert.equal(result.expressions[1].chineseMeaning.includes("业内"), false);
 });

@@ -90,6 +90,10 @@ input:focus, textarea:focus { border-color: var(--green); box-shadow: 0 0 0 3px 
 .delete-button:hover { text-decoration: underline; }
 .delete-button:disabled { opacity: .45; cursor: default; }
 .empty { margin: 0; padding: 44px; text-align: center; color: var(--muted); }
+.collection-intro { margin: 22px 0 28px; color: var(--muted); line-height: 1.6; }
+.collection-item small a { color: var(--green); }
+.collection-times { display: flex; flex: 0 0 auto; flex-direction: column; align-items: flex-end; gap: 8px; }
+.collection-times time { color: var(--muted); font-size: 11px; white-space: nowrap; }
 @media (max-width: 760px) {
   .app-shell { padding: 0 18px 50px; }
   .topbar { height: 70px; }
@@ -121,5 +125,6 @@ input:focus, textarea:focus { border-color: var(--green); box-shadow: 0 0 0 3px 
   .stats-grid strong { font-size: 28px; }
   .history-item { padding: 20px; }
   .history-item time { display: none; }
+  .collection-times { display: none; }
   .item-actions { align-items: flex-end; }
 }

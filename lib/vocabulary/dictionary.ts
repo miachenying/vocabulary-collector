@@ -1,5 +1,6 @@
 import { logExternalAttempt, type TraceContext } from "./observability";
 import { isRetryableHttpStatus, withRetry } from "./retry";
+import { dictionaryRequestInit } from "./provider-timeout";
 
 export type DictionarySense = {
   partOfSpeech: string | null;
@@ -39,7 +40,7 @@ export async function lookupEnglishWord(word: string, trace?: TraceContext | nul
   return withRetry(async ({ attempt, maxAttempts }) => {
     const startedAt = Date.now();
     try {
-      const response = await fetch(`https://api.dictionaryapi.dev/api/v2/entries/en/${encodeURIComponent(word)}`);
+      const response = await fetch(`https://api.dictionaryapi.dev/api/v2/entries/en/${encodeURIComponent(word)}`, dictionaryRequestInit());
       if (response.status === 404) {
         logExternalAttempt({
           provider: "dictionaryapi.dev",
@@ -105,7 +106,7 @@ export async function lookupEnglishWord(word: string, trace?: TraceContext | nul
       throw error;
     }
   }, {
-    maxAttempts: 2,
-    shouldRetry: (error) => !(error instanceof DictionaryHttpError) || isRetryableHttpStatus(error.status),
+    maxAttempts: 1,
+    shouldRetry: () => false,
   });
 }
