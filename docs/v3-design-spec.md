@@ -22,6 +22,14 @@ Move Vocabulary Collector from a paste-first website to a secure capture system 
 - Open Vocabulary Collector in a compact window with captured fields prefilled.
 - Reuse Sites' ChatGPT sign-in; do not store authentication secrets in the extension.
 - Require the user to review context and submit before data is written.
+- Limit captured context to the complete sentence containing the selection when punctuation is available.
+
+### M10 — Encounter details
+
+- Store Note on the individual encounter and preserve different notes for repeated encounters.
+- Let Collection expand an item to show every context, source, Note, and timestamp.
+- Let the user delete one owned encounter without deleting unrelated encounters.
+- Remove an empty sense or vocabulary item after its final encounter is deleted.
 
 ## Explicitly deferred
 

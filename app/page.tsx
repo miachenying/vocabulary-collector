@@ -45,8 +45,18 @@ type CollectionItem = {
   contextSentence: string | null;
   sourceTitle: string | null;
   sourceUrl: string | null;
+  note: string | null;
   encounteredAt: string;
   encounterCount: number;
+  encounters: Array<{
+    id: string;
+    encounteredForm: string;
+    contextSentence: string | null;
+    sourceTitle: string | null;
+    sourceUrl: string | null;
+    note: string | null;
+    encounteredAt: string;
+  }>;
 };
 
 type HistoryResponse = {
@@ -107,6 +117,8 @@ export default function Home() {
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [collection, setCollection] = useState<CollectionItem[]>([]);
   const [collectionLoading, setCollectionLoading] = useState(false);
+  const [expandedCollectionIds, setExpandedCollectionIds] = useState<string[]>([]);
+  const [deletingEncounterId, setDeletingEncounterId] = useState<string | null>(null);
   const [capturedFromPage, setCapturedFromPage] = useState(false);
 
   useEffect(() => {
@@ -131,8 +143,7 @@ export default function Home() {
     return true;
   }
 
-  async function openCollection() {
-    setView("collection");
+  async function loadCollection() {
     setCollectionLoading(true);
     setMessage(null);
     try {
@@ -145,6 +156,38 @@ export default function Home() {
       setMessage("Collection is temporarily unavailable. Please try again.");
     } finally {
       setCollectionLoading(false);
+    }
+  }
+
+  function openCollection() {
+    setView("collection");
+    void loadCollection();
+  }
+
+  function toggleCollectionItem(itemId: string) {
+    setExpandedCollectionIds((current) => current.includes(itemId)
+      ? current.filter((id) => id !== itemId)
+      : [...current, itemId]);
+  }
+
+  async function deleteEncounter(encounterId: string) {
+    if (deletingEncounterId) return;
+    setDeletingEncounterId(encounterId);
+    setMessage(null);
+    try {
+      const response = await fetch("/api/collection", {
+        method: "DELETE",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ encounterId }),
+      });
+      const payload = await response.json();
+      if (redirectToSignIn(response, payload)) return;
+      if (!response.ok) throw new Error(payload.error || "Delete failed");
+      await loadCollection();
+    } catch {
+      setMessage("This encounter could not be deleted. Please try again.");
+    } finally {
+      setDeletingEncounterId(null);
     }
   }
 
@@ -284,7 +327,7 @@ export default function Home() {
         </button>
         <nav className="nav-tabs" aria-label="Primary navigation">
           <button className={view === "lookup" ? "active" : ""} onClick={() => setView("lookup")}>Lookup</button>
-          <button className={view === "collection" ? "active" : ""} onClick={() => void openCollection()}>Collection</button>
+          <button className={view === "collection" ? "active" : ""} onClick={openCollection}>Collection</button>
           <button className={view === "history" ? "active" : ""} onClick={openHistory}>History</button>
         </nav>
       </header>
@@ -375,7 +418,9 @@ export default function Home() {
           <div className="history-list collection-list" aria-live="polite">
             {collectionLoading ? <p className="empty">Loading collection…</p> : collection.length === 0 ? (
               <p className="empty">Nothing saved yet. Look up a word or save an expression to start your collection.</p>
-            ) : collection.map((item) => (
+            ) : collection.map((item) => {
+              const expanded = expandedCollectionIds.includes(item.id);
+              return (
               <article className="history-item collection-item" key={item.id}>
                 <div className="item-main">
                   <div className="term-line"><h2>{item.canonicalForm}</h2><span className="repeat-badge">{item.itemType}</span></div>
@@ -383,13 +428,35 @@ export default function Home() {
                   {item.encounteredForm !== item.canonicalForm && <small>Encountered as: {item.encounteredForm}</small>}
                   {item.contextSentence && <blockquote>“{item.contextSentence}”</blockquote>}
                   {(item.sourceTitle || item.sourceUrl) && <small>Source: {item.sourceUrl ? <a href={item.sourceUrl} target="_blank" rel="noreferrer">{item.sourceTitle || item.sourceUrl}</a> : item.sourceTitle}</small>}
+                  {item.note && <p className="encounter-note">Note: {item.note}</p>}
+                  <button className="encounter-toggle" type="button" onClick={() => toggleCollectionItem(item.id)} aria-expanded={expanded}>
+                    {expanded ? "Hide encounters" : `View ${item.encounterCount} ${item.encounterCount === 1 ? "encounter" : "encounters"}`}
+                  </button>
+                  {expanded && (
+                    <div className="encounter-list">
+                      {item.encounters.map((encounter) => (
+                        <section className="encounter-row" key={encounter.id}>
+                          <div>
+                            <strong>{encounter.encounteredForm}</strong>
+                            {encounter.contextSentence && <blockquote>“{encounter.contextSentence}”</blockquote>}
+                            {(encounter.sourceTitle || encounter.sourceUrl) && <small>Source: {encounter.sourceUrl ? <a href={encounter.sourceUrl} target="_blank" rel="noreferrer">{encounter.sourceTitle || encounter.sourceUrl}</a> : encounter.sourceTitle}</small>}
+                            {encounter.note && <p className="encounter-note">Note: {encounter.note}</p>}
+                            <time>{new Date(encounter.encounteredAt).toLocaleString([], { month: "short", day: "numeric", year: "numeric", hour: "numeric", minute: "2-digit" })}</time>
+                          </div>
+                          <button className="delete-button" type="button" disabled={Boolean(deletingEncounterId)} onClick={() => void deleteEncounter(encounter.id)}>
+                            {deletingEncounterId === encounter.id ? "Deleting…" : "Delete"}
+                          </button>
+                        </section>
+                      ))}
+                    </div>
+                  )}
                 </div>
                 <div className="collection-times">
                   <span className="encounter-count">{item.encounterCount} {item.encounterCount === 1 ? "encounter" : "encounters"}</span>
                   <time>Last seen {new Date(item.encounteredAt).toLocaleString([], { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}</time>
                 </div>
               </article>
-            ))}
+            );})}
           </div>
           {message && <p className="message" role="status">{message}</p>}
         </section>

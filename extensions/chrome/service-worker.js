@@ -16,16 +16,10 @@ async function selectionCapture(tab, selectionText) {
           const selected = selection?.toString().trim() ?? "";
           const container = selection?.rangeCount ? selection.getRangeAt(0).commonAncestorContainer : null;
           const text = (container?.nodeType === Node.TEXT_NODE ? container.parentElement?.innerText : container?.textContent) ?? "";
-          if (!selected || !text) return "";
-          const normalized = text.replace(/\s+/g, " ").trim();
-          const index = normalized.toLocaleLowerCase().indexOf(selected.toLocaleLowerCase());
-          if (index < 0) return normalized.slice(0, 500);
-          const before = normalized.lastIndexOf(". ", index);
-          const after = normalized.indexOf(". ", index + selected.length);
-          return normalized.slice(before < 0 ? Math.max(0, index - 180) : before + 2, after < 0 ? Math.min(normalized.length, index + selected.length + 180) : after + 1).slice(0, 700);
+          return { selected, text };
         },
       });
-      context = result ?? "";
+      context = result ? extractFocusedContext(result.text, result.selected) : "";
     } catch {
       // Restricted pages still work without surrounding context.
     }
@@ -52,3 +46,4 @@ chrome.commands.onCommand.addListener(async (command) => {
   const [{ result }] = await chrome.scripting.executeScript({ target: { tabId: tab.id }, func: () => window.getSelection()?.toString().trim() ?? "" }).catch(() => [{ result: "" }]);
   if (result) await selectionCapture(tab, result);
 });
+import { extractFocusedContext } from "./context.js";

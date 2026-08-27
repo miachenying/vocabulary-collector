@@ -58,6 +58,7 @@ export async function POST(request: NextRequest) {
       contextSentence: context,
       sourceTitle,
       sourceUrl,
+      note,
       lookedUpAt: now,
     });
     logRequestStage({ trace, stage: "lookup_history_start", outcome: "success", inputType: inputTypeV2 });
@@ -151,6 +152,7 @@ export async function POST(request: NextRequest) {
           contextSentence: context,
           sourceTitle,
           sourceUrl,
+          note,
           lookedUpAt: now,
           lookupEventId: v2LookupEventId,
           canonicalForm,

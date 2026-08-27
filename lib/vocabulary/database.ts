@@ -44,7 +44,7 @@ const createEvents = `CREATE TABLE IF NOT EXISTS lookup_events (
 
 const createLookupEventsV2 = `CREATE TABLE IF NOT EXISTS lookup_events_v2 (
   id TEXT PRIMARY KEY, user_id TEXT NOT NULL, raw_input TEXT NOT NULL, input_type TEXT NOT NULL,
-  status TEXT NOT NULL, context_sentence TEXT, source_title TEXT, source_url TEXT,
+  status TEXT NOT NULL, context_sentence TEXT, source_title TEXT, source_url TEXT, note TEXT,
   looked_up_at TEXT NOT NULL, created_at TEXT NOT NULL
 )`;
 
@@ -62,11 +62,11 @@ const createVocabularySenses = `CREATE TABLE IF NOT EXISTS vocabulary_senses (
 const createEncounters = `CREATE TABLE IF NOT EXISTS encounters (
   id TEXT PRIMARY KEY, vocabulary_item_id TEXT NOT NULL, vocabulary_sense_id TEXT NOT NULL,
   lookup_event_id TEXT, encountered_form TEXT NOT NULL, context_sentence TEXT, source_title TEXT,
-  source_url TEXT, encountered_at TEXT NOT NULL, created_at TEXT NOT NULL
+  source_url TEXT, note TEXT, encountered_at TEXT NOT NULL, created_at TEXT NOT NULL
 )`;
 
 const backfillLookupEventsV2 = `INSERT OR IGNORE INTO lookup_events_v2 (
-  id, user_id, raw_input, input_type, status, context_sentence, source_title, source_url, looked_up_at, created_at
+  id, user_id, raw_input, input_type, status, context_sentence, source_title, source_url, note, looked_up_at, created_at
 )
 SELECT le.id, le.user_id, ve.display_term,
   CASE
@@ -77,7 +77,7 @@ SELECT le.id, le.user_id, ve.display_term,
     ELSE 'word'
   END,
   CASE WHEN ve.chinese_definition IS NOT NULL AND trim(ve.chinese_definition) <> '' THEN 'success' ELSE 'failed' END,
-  le.context_sentence, le.source_title, le.source_url, le.looked_up_at, le.looked_up_at
+  le.context_sentence, le.source_title, le.source_url, ve.note, le.looked_up_at, le.looked_up_at
 FROM lookup_events le
 JOIN vocabulary_entries ve ON ve.id = le.entry_id`;
 
@@ -107,10 +107,10 @@ WHERE ve.chinese_definition IS NOT NULL AND trim(ve.chinese_definition) <> ''
 
 const backfillEncounters = `INSERT OR IGNORE INTO encounters (
   id, vocabulary_item_id, vocabulary_sense_id, lookup_event_id, encountered_form,
-  context_sentence, source_title, source_url, encountered_at, created_at
+  context_sentence, source_title, source_url, note, encountered_at, created_at
 )
 SELECT 'enc_' || le.id, 'item_' || ve.id, 'sense_' || ve.id, le.id, ve.display_term,
-  le.context_sentence, le.source_title, le.source_url, le.looked_up_at, le.looked_up_at
+  le.context_sentence, le.source_title, le.source_url, ve.note, le.looked_up_at, le.looked_up_at
 FROM lookup_events le
 JOIN vocabulary_entries ve ON ve.id = le.entry_id
 WHERE ve.chinese_definition IS NOT NULL AND trim(ve.chinese_definition) <> ''
@@ -120,6 +120,17 @@ WHERE ve.chinese_definition IS NOT NULL AND trim(ve.chinese_definition) <> ''
   )`;
 
 let initialized = false;
+
+async function ensureTextColumn(database: Db, table: string, column: string) {
+  const columns = await database.prepare(`PRAGMA table_info(${table})`).all<{ name: string }>();
+  if (columns.results.some((candidate) => candidate.name === column)) return;
+  try {
+    await database.prepare(`ALTER TABLE ${table} ADD COLUMN ${column} TEXT`).run();
+  } catch (error) {
+    const refreshed = await database.prepare(`PRAGMA table_info(${table})`).all<{ name: string }>();
+    if (!refreshed.results.some((candidate) => candidate.name === column)) throw error;
+  }
+}
 
 export async function ensureVocabularySchema() {
   if (initialized) return;
@@ -134,6 +145,10 @@ export async function ensureVocabularySchema() {
     database.prepare(createVocabularyItems),
     database.prepare(createVocabularySenses),
     database.prepare(createEncounters),
+  ]);
+  await ensureTextColumn(database, "lookup_events_v2", "note");
+  await ensureTextColumn(database, "encounters", "note");
+  await database.batch([
     database.prepare("CREATE INDEX IF NOT EXISTS lookup_v2_user_time_idx ON lookup_events_v2(user_id, looked_up_at)"),
     database.prepare("CREATE INDEX IF NOT EXISTS lookup_v2_user_type_time_idx ON lookup_events_v2(user_id, input_type, looked_up_at)"),
     database.prepare("CREATE INDEX IF NOT EXISTS vocabulary_item_user_updated_idx ON vocabulary_items(user_id, updated_at)"),

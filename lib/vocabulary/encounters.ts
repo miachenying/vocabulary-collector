@@ -9,6 +9,7 @@ export type EncounterRow = {
   context_sentence: string | null;
   source_title: string | null;
   source_url: string | null;
+  note: string | null;
   encountered_at: string;
   created_at: string;
 };
@@ -22,6 +23,7 @@ type CreateEncounterInput = {
   contextSentence?: string | null;
   sourceTitle?: string | null;
   sourceUrl?: string | null;
+  note?: string | null;
   encounteredAt: string;
 };
 
@@ -35,6 +37,7 @@ export async function createEncounter(input: CreateEncounterInput) {
     contextSentence = null,
     sourceTitle = null,
     sourceUrl = null,
+    note = null,
     encounteredAt,
   } = input;
 
@@ -46,10 +49,10 @@ export async function createEncounter(input: CreateEncounterInput) {
   const id = crypto.randomUUID();
   await database.prepare(`INSERT INTO encounters
     (id, vocabulary_item_id, vocabulary_sense_id, lookup_event_id, encountered_form,
-     context_sentence, source_title, source_url, encountered_at, created_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+     context_sentence, source_title, source_url, note, encountered_at, created_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
     .bind(id, vocabularyItemId, vocabularySenseId, lookupEventId, encounteredForm,
-      contextSentence, sourceTitle, sourceUrl, encounteredAt, encounteredAt).run();
+      contextSentence, sourceTitle, sourceUrl, note, encounteredAt, encounteredAt).run();
 
   return database.prepare("SELECT * FROM encounters WHERE id = ?")
     .bind(id).first<EncounterRow>();

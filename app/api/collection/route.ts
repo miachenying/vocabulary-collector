@@ -3,8 +3,9 @@ import { ensureVocabularySchema, getVocabularyDb, migrateLegacyEmailUserId } fro
 import { parseManualSentenceSaveInput } from "@/lib/vocabulary/manual-save-input";
 import { saveSentenceSuggestion } from "@/lib/vocabulary/collection-save";
 import { logRequestStage, type TraceContext } from "@/lib/vocabulary/observability";
-import { groupCollectionRows, listCollection } from "@/lib/vocabulary/collection";
+import { deleteCollectionEncounter, groupCollectionRows, listCollection } from "@/lib/vocabulary/collection";
 import { authenticatedUser, authenticationRequiredBody } from "@/lib/vocabulary/request-user";
+import { nullableString } from "@/lib/vocabulary/input";
 
 export const dynamic = "force-dynamic";
 
@@ -59,4 +60,17 @@ export async function POST(request: NextRequest) {
     logRequestStage({ trace, stage: "request", outcome: "failure", durationMs: Date.now() - startedAt, errorName: error instanceof Error ? error.name : "UnknownError" });
     return jsonWithTrace({ error: message, requestId: trace.requestId }, status, trace);
   }
+}
+
+export async function DELETE(request: NextRequest) {
+  const user = authenticatedUser(request.headers);
+  if (!user) return NextResponse.json(authenticationRequiredBody(), { status: 401 });
+  await ensureVocabularySchema();
+  await migrateLegacyEmailUserId(getVocabularyDb(), user.email, user.userId);
+  const body = await request.json().catch(() => null) as Record<string, unknown> | null;
+  const encounterId = nullableString(body?.encounterId);
+  if (!encounterId) return NextResponse.json({ error: "An encounter is required." }, { status: 400 });
+  const deleted = await deleteCollectionEncounter(getVocabularyDb(), user.userId, encounterId);
+  if (!deleted) return NextResponse.json({ error: "Encounter not found." }, { status: 404 });
+  return NextResponse.json({ deleted: true });
 }
