@@ -1,6 +1,7 @@
 "use client";
 
-import { FormEvent, useEffect, useMemo, useState } from "react";
+import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
+import { sentenceAroundSelection, shareShortcutBaseUrl } from "@/lib/vocabulary/reading";
 
 type Entry = {
   id: string;
@@ -102,7 +103,7 @@ function toIsoBounds(start: string, end: string) {
 
 export default function Home() {
   const today = rangeFor("today");
-  const [view, setView] = useState<"lookup" | "collection" | "history">("lookup");
+  const [view, setView] = useState<"lookup" | "reading" | "collection" | "history">("lookup");
   const [term, setTerm] = useState("");
   const [context, setContext] = useState("");
   const [sourceTitle, setSourceTitle] = useState("");
@@ -127,6 +128,18 @@ export default function Home() {
   const [deletingEncounterId, setDeletingEncounterId] = useState<string | null>(null);
   const [capturedFromPage, setCapturedFromPage] = useState(false);
   const [dictionaryPreview, setDictionaryPreview] = useState<DictionaryPreview | null>(null);
+  const [readerDraft, setReaderDraft] = useState("");
+  const [readerTitle, setReaderTitle] = useState("");
+  const [readerUrl, setReaderUrl] = useState("");
+  const [readerActive, setReaderActive] = useState(false);
+  const [readerSelection, setReaderSelection] = useState<{ term: string; context: string; top: number; left: number } | null>(null);
+  const [readerResult, setReaderResult] = useState<Entry | null>(null);
+  const [readerPreview, setReaderPreview] = useState<DictionaryPreview | null>(null);
+  const [readerLoading, setReaderLoading] = useState(false);
+  const [readerMessage, setReaderMessage] = useState<string | null>(null);
+  const [shareHelpOpen, setShareHelpOpen] = useState(false);
+  const [shareCopied, setShareCopied] = useState(false);
+  const readerRef = useRef<HTMLElement | null>(null);
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
@@ -139,6 +152,7 @@ export default function Home() {
       setSourceUrl((params.get("sourceUrl") ?? "").slice(0, 2000));
       setDetailsOpen(Boolean(params.get("context") || params.get("sourceTitle") || params.get("sourceUrl")));
       setCapturedFromPage(params.get("capture") === "1");
+      if (params.get("share") === "1") setCapturedFromPage(true);
     }, 0);
     return () => window.clearTimeout(timer);
   }, []);
@@ -148,6 +162,82 @@ export default function Home() {
     const returnTo = `${window.location.pathname}${window.location.search}`;
     window.location.assign(`/signin-with-chatgpt?return_to=${encodeURIComponent(returnTo)}`);
     return true;
+  }
+
+  const readerParagraphs = useMemo(() => readerDraft.trim().split(/\n\s*\n/).map((paragraph) => paragraph.trim()).filter(Boolean), [readerDraft]);
+
+  function captureReaderSelection() {
+    window.setTimeout(() => {
+      const selection = window.getSelection();
+      const selectedText = selection?.toString().trim() ?? "";
+      if (!selection || selection.isCollapsed || !selectedText || selectedText.length > 200) {
+        setReaderSelection(null);
+        return;
+      }
+      const anchor = selection.anchorNode;
+      const focus = selection.focusNode;
+      if (!anchor || !focus || !readerRef.current?.contains(anchor) || !readerRef.current.contains(focus)) return;
+      const paragraph = anchor.nodeType === Node.TEXT_NODE ? anchor.parentElement?.closest("p") : (anchor as Element).closest?.("p");
+      const paragraphText = paragraph?.textContent?.trim() || readerDraft;
+      const rect = selection.getRangeAt(0).getBoundingClientRect();
+      setReaderSelection({
+        term: selectedText,
+        context: sentenceAroundSelection(paragraphText, selectedText),
+        top: Math.max(76, rect.top - 54),
+        left: Math.min(window.innerWidth - 86, Math.max(12, rect.left + rect.width / 2 - 40)),
+      });
+    }, 20);
+  }
+
+  async function lookupReaderSelection() {
+    if (!readerSelection || readerLoading) return;
+    const selected = readerSelection;
+    setReaderLoading(true);
+    setReaderResult(null);
+    setReaderPreview(null);
+    setReaderMessage(null);
+    setReaderSelection(null);
+    window.getSelection()?.removeAllRanges();
+    try {
+      void fetch("/api/lookups/preview", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ term: selected.term }),
+      }).then(async (response) => {
+        const payload = await response.json() as { preview?: DictionaryPreview | null };
+        if (response.ok && payload.preview) setReaderPreview(payload.preview);
+      }).catch(() => undefined);
+
+      const response = await fetch("/api/lookups", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          term: selected.term,
+          context: selected.context,
+          sourceTitle: readerTitle || "Reading View",
+          sourceUrl: readerUrl || null,
+        }),
+      });
+      const payload = await response.json();
+      if (redirectToSignIn(response, payload)) return;
+      if (!response.ok && !payload.entry) throw new Error(payload.error || "Lookup failed");
+      setReaderResult(payload.entry);
+      if (payload.warning) setReaderMessage(payload.warning);
+    } catch {
+      setReaderMessage("This selection could not be looked up. Please try again.");
+    } finally {
+      setReaderLoading(false);
+    }
+  }
+
+  async function copyShortcutUrl() {
+    try {
+      await navigator.clipboard.writeText(shareShortcutBaseUrl(window.location.origin));
+      setShareCopied(true);
+      window.setTimeout(() => setShareCopied(false), 1800);
+    } catch {
+      setReaderMessage("Copy this page address, then add ?share=1&term= at the end in Shortcuts.");
+    }
   }
 
   async function loadCollection() {
@@ -361,6 +451,7 @@ export default function Home() {
         </button>
         <nav className="nav-tabs" aria-label="Primary navigation">
           <button className={view === "lookup" ? "active" : ""} onClick={() => setView("lookup")}>Lookup</button>
+          <button className={view === "reading" ? "active" : ""} onClick={() => setView("reading")}>Reading</button>
           <button className={view === "collection" ? "active" : ""} onClick={openCollection}>Collection</button>
           <button className={view === "history" ? "active" : ""} onClick={openHistory}>History</button>
         </nav>
@@ -454,6 +545,60 @@ export default function Home() {
             )}
             {message && <p className="message" role="status">{message}</p>}
           </div>
+        </section>
+      ) : view === "reading" ? (
+        <section className="reading-layout">
+          {!readerActive ? (
+            <div className="reading-setup">
+              <div className="reading-heading">
+                <p className="eyebrow">READ & LOOK UP</p>
+                <h1>Read naturally.<br />Keep what matters.</h1>
+                <p>Paste an article, then select any word or phrase without leaving the page.</p>
+              </div>
+              <div className="reading-form">
+                <label>Article title <input value={readerTitle} onChange={(event) => setReaderTitle(event.target.value)} placeholder="Optional" /></label>
+                <label>Source URL <input type="url" value={readerUrl} onChange={(event) => setReaderUrl(event.target.value)} placeholder="https://medium.com/…" /></label>
+                <label>Article text <textarea value={readerDraft} onChange={(event) => setReaderDraft(event.target.value)} placeholder="Paste the article text here…" /></label>
+                <button className="primary reading-start" type="button" disabled={!readerDraft.trim()} onClick={() => setReaderActive(true)}>Start reading</button>
+                <button className="shortcut-toggle" type="button" onClick={() => setShareHelpOpen(!shareHelpOpen)}>Set up iPhone Share menu</button>
+                {shareHelpOpen && (
+                  <div className="shortcut-help">
+                    <h2>One-time iPhone setup</h2>
+                    <ol>
+                      <li>Open Shortcuts and create a new shortcut that accepts Text from the Share Sheet.</li>
+                      <li>Add a URL action. Paste the setup URL, then place Shortcut Input after the final equals sign.</li>
+                      <li>Add Open URLs and name the shortcut “Vocabulary Collector”.</li>
+                      <li>In Medium or Safari, select text and choose Share → Vocabulary Collector.</li>
+                    </ol>
+                    <button type="button" onClick={() => void copyShortcutUrl()}>{shareCopied ? "Copied" : "Copy setup URL"}</button>
+                  </div>
+                )}
+              </div>
+            </div>
+          ) : (
+            <div className="reader-shell">
+              <header className="reader-toolbar">
+                <div><small>READING VIEW</small><strong>{readerTitle || "Untitled article"}</strong></div>
+                <button type="button" onClick={() => { setReaderActive(false); setReaderSelection(null); setReaderResult(null); setReaderPreview(null); }}>Edit article</button>
+              </header>
+              <p className="reader-tip">Select a word or phrase, then tap Lookup.</p>
+              <article ref={readerRef} className="reader-article" onPointerUp={captureReaderSelection} onTouchEnd={captureReaderSelection} onKeyUp={captureReaderSelection}>
+                {readerParagraphs.map((paragraph, index) => <p key={`${index}-${paragraph.slice(0, 24)}`}>{paragraph}</p>)}
+              </article>
+              {readerSelection && (
+                <button className="selection-lookup" style={{ top: readerSelection.top, left: readerSelection.left }} type="button" onClick={() => void lookupReaderSelection()}>Lookup</button>
+              )}
+              {(readerLoading || readerPreview || readerResult || readerMessage) && (
+                <aside className="reader-result-sheet" aria-live="polite">
+                  <button className="sheet-close" type="button" aria-label="Close lookup result" onClick={() => { setReaderResult(null); setReaderPreview(null); setReaderMessage(null); }}>×</button>
+                  {readerLoading && <small className="sheet-status">Looking up selection…</small>}
+                  {readerPreview && <div className="sheet-preview"><strong>{readerPreview.word}</strong>{readerPreview.phonetic && <span>{readerPreview.phonetic}</span>}<p>{readerPreview.senses[0]?.definition}</p></div>}
+                  {readerResult && <div className="sheet-result"><strong>{readerResult.displayTerm}</strong><p>{readerResult.chineseDefinition || "Meaning unavailable"}</p><small>Saved with this sentence and source.</small></div>}
+                  {readerMessage && <p className="message">{readerMessage}</p>}
+                </aside>
+              )}
+            </div>
+          )}
         </section>
       ) : view === "collection" ? (
         <section className="history-layout collection-layout">

@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { expressionAppearsInSentence, parseManualSentenceSaveInput } from "../lib/vocabulary/manual-save-input.ts";
+import { sentenceAroundSelection, shareShortcutBaseUrl } from "../lib/vocabulary/reading.ts";
 import { groupCollectionRows } from "../lib/vocabulary/collection.ts";
 import { extractFocusedContext } from "../extensions/chrome/context.js";
 
@@ -91,4 +92,18 @@ test("browser capture supports question marks and selected headings", () => {
     "How can spirituality help us cultivate resilience, equanimity, and balance?",
   );
   assert.equal(extractFocusedContext("A heading without punctuation", "heading"), "A heading without punctuation");
+});
+
+test("reading selection captures the containing sentence", () => {
+  assert.equal(
+    sentenceAroundSelection("The opening was simple. Her explanation did not add up. Then everyone left.", "add up"),
+    "Her explanation did not add up.",
+  );
+});
+
+test("share shortcut URL targets the authenticated lookup entry", () => {
+  assert.equal(
+    shareShortcutBaseUrl("https://vocabulary.example/"),
+    "https://vocabulary.example/?share=1&term=",
+  );
 });
