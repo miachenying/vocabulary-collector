@@ -127,6 +127,7 @@ input:focus, textarea:focus { border-color: var(--green); box-shadow: 0 0 0 3px 
 .shortcut-help { padding: 17px; border-radius: 14px; background: var(--soft-green); color: var(--green-dark); }
 .shortcut-help h2 { margin: 0; font-family: Georgia, serif; font-size: 18px; }
 .shortcut-help ol { margin: 12px 0; padding-left: 20px; font-size: 12px; line-height: 1.6; }
+.shortcut-note { margin: 0 0 12px; font-size: 12px; line-height: 1.55; color: #486452; }
 .shortcut-help button { min-height: 38px; padding: 0 13px; border: 1px solid #aebfaf; border-radius: 9px; background: white; color: var(--green-dark); font-size: 12px; font-weight: 700; }
 .reader-shell { position: relative; max-width: 780px; margin: 0 auto; }
 .reader-toolbar { position: sticky; z-index: 5; top: 0; display: flex; justify-content: space-between; align-items: center; gap: 20px; padding: 14px 0; background: color-mix(in srgb, var(--paper) 94%, transparent); backdrop-filter: blur(12px); border-bottom: 1px solid var(--line); }

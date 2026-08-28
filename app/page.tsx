@@ -1,7 +1,7 @@
 "use client";
 
 import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
-import { sentenceAroundSelection, shareShortcutBaseUrl } from "@/lib/vocabulary/reading";
+import { safariCaptureScript, sentenceAroundSelection } from "@/lib/vocabulary/reading";
 
 type Entry = {
   id: string;
@@ -144,6 +144,13 @@ export default function Home() {
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const capturedTerm = params.get("term")?.trim();
+    if (params.get("captureError") === "no-selection") {
+      const timer = window.setTimeout(() => {
+        setCapturedFromPage(true);
+        setMessage("No selected text was found. Return to Safari, select a word, then run the shortcut again.");
+      }, 0);
+      return () => window.clearTimeout(timer);
+    }
     if (!capturedTerm) return;
     const timer = window.setTimeout(() => {
       setTerm(capturedTerm.slice(0, 2000));
@@ -230,13 +237,13 @@ export default function Home() {
     }
   }
 
-  async function copyShortcutUrl() {
+  async function copySafariScript() {
     try {
-      await navigator.clipboard.writeText(shareShortcutBaseUrl(window.location.origin));
+      await navigator.clipboard.writeText(safariCaptureScript(window.location.origin));
       setShareCopied(true);
       window.setTimeout(() => setShareCopied(false), 1800);
     } catch {
-      setReaderMessage("Copy this page address, then add ?share=1&term= at the end in Shortcuts.");
+      setReaderMessage("The Safari capture script could not be copied. Please try again.");
     }
   }
 
@@ -563,14 +570,16 @@ export default function Home() {
                 <button className="shortcut-toggle" type="button" onClick={() => setShareHelpOpen(!shareHelpOpen)}>Set up iPhone Share menu</button>
                 {shareHelpOpen && (
                   <div className="shortcut-help">
-                    <h2>One-time iPhone setup</h2>
+                    <h2>Safari setup — context included</h2>
                     <ol>
-                      <li>Open Shortcuts and create a new shortcut that accepts Text from the Share Sheet.</li>
-                      <li>Add a URL action. Paste the setup URL, then place Shortcut Input after the final equals sign.</li>
-                      <li>Add Open URLs and name the shortcut “Vocabulary Collector”.</li>
-                      <li>In Medium or Safari, select text and choose Share → Vocabulary Collector.</li>
+                      <li>Open your “Vocabulary Collector” shortcut. Keep Show in Share Sheet on, then change Receive to Safari Web Pages only.</li>
+                      <li>Delete the old URL Encode, URL, and Open URL actions.</li>
+                      <li>Add Run JavaScript on Web Page. Copy the script below and paste it into that action; run it on Shortcut Input.</li>
+                      <li>Add Open URLs and set its input to JavaScript Result.</li>
+                      <li>In Safari, select text, keep it highlighted, tap Safari’s toolbar Share button, then choose Vocabulary Collector.</li>
                     </ol>
-                    <button type="button" onClick={() => void copyShortcutUrl()}>{shareCopied ? "Copied" : "Copy setup URL"}</button>
+                    <p className="shortcut-note">This captures the selected text, its sentence, the page title, and the page URL. Medium’s iPhone app may still share only its article URL.</p>
+                    <button type="button" onClick={() => void copySafariScript()}>{shareCopied ? "Script copied" : "Copy Safari capture script"}</button>
                   </div>
                 )}
               </div>
