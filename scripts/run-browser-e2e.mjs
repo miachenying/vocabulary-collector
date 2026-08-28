@@ -47,9 +47,12 @@ try {
   page.setDefaultTimeout(10_000);
   let savedPayload = null;
   let deletedEncounterId = null;
+  let lastLookupPayload = null;
 
   await page.route("**/api/lookups", async (route) => {
     if (route.request().method() !== "POST") return route.continue();
+    lastLookupPayload = route.request().postDataJSON();
+    const isReadingLookup = lastLookupPayload.term?.toLowerCase() === "resilience";
     await route.fulfill({
       status: 200,
       contentType: "application/json",
@@ -58,8 +61,8 @@ try {
         warning: null,
         entry: {
           id: "browser-entry",
-          displayTerm: sentence,
-          chineseDefinition: "这个解释似乎不太说得通。",
+          displayTerm: isReadingLookup ? "resilience" : sentence,
+          chineseDefinition: isReadingLookup ? "韧性；复原力" : "这个解释似乎不太说得通。",
           contextSentence: null,
           sourceTitle: null,
           sourceUrl: null,
@@ -73,7 +76,7 @@ try {
           lastEventId: "browser-event",
           inputType: "sentence",
         },
-        sentenceAnalysis: {
+        sentenceAnalysis: isReadingLookup ? null : {
           lookupEventId: "browser-lookup-event",
           translation: "这个解释似乎不太说得通。",
           expressions: [{
@@ -140,6 +143,39 @@ try {
   assert.equal(await page.getByLabel("Source URL").inputValue(), "https://example.com/article");
 
   await page.goto(baseUrl, { waitUntil: "networkidle" });
+
+  await page.goto(`${baseUrl}/?share=1&term=resilience`, { waitUntil: "networkidle" });
+  assert.equal(await page.locator("#term").inputValue(), "resilience");
+  await page.getByText("Captured from your browser", { exact: false }).waitFor();
+
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto(baseUrl, { waitUntil: "networkidle" });
+  await page.getByRole("button", { name: "Reading", exact: true }).click();
+  await page.getByLabel("Article title").fill("Reading E2E");
+  await page.getByLabel("Source URL").fill("https://example.com/reading");
+  await page.getByLabel("Article text").fill("The first paragraph is ordinary.\n\nResilience helps people recover after difficult experiences.");
+  await page.getByRole("button", { name: "Start reading", exact: true }).click();
+  await page.locator(".reader-article p").last().evaluate((paragraph) => {
+    const node = paragraph.firstChild;
+    const text = node?.textContent ?? "";
+    const start = text.indexOf("Resilience");
+    const range = document.createRange();
+    range.setStart(node, start);
+    range.setEnd(node, start + "resilience".length);
+    const selection = window.getSelection();
+    selection.removeAllRanges();
+    selection.addRange(range);
+    paragraph.dispatchEvent(new PointerEvent("pointerup", { bubbles: true }));
+  });
+  await page.locator(".selection-lookup").click();
+  await page.getByText("韧性；复原力", { exact: true }).waitFor();
+  assert.equal(lastLookupPayload.term, "Resilience");
+  assert.equal(lastLookupPayload.context, "Resilience helps people recover after difficult experiences.");
+  assert.equal(lastLookupPayload.sourceTitle, "Reading E2E");
+  assert.equal(lastLookupPayload.sourceUrl, "https://example.com/reading");
+
+  await page.setViewportSize({ width: 1280, height: 720 });
+  await page.goto(baseUrl, { waitUntil: "networkidle" });
   await page.locator("#term").fill(sentence);
   await page.getByRole("button", { name: "Look up" }).click();
 
@@ -171,7 +207,7 @@ try {
   await encounterDeletes.first().click();
   assert.equal(deletedEncounterId, "encounter-new");
 
-  console.log("Browser E2E passed: capture prefill, encounter notes, expansion, and deletion were verified.");
+  console.log("Browser E2E passed: share prefill, Reading View selection lookup, capture context, encounter notes, expansion, and deletion were verified.");
 } catch (error) {
   console.error(serverLog);
   throw error;
