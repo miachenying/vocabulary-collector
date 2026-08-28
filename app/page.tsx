@@ -35,6 +35,12 @@ type SentenceAnalysis = {
   status?: "ready" | "degraded";
 };
 
+type DictionaryPreview = {
+  word: string;
+  phonetic: string | null;
+  senses: Array<{ partOfSpeech: string | null; definition: string; example: string | null }>;
+};
+
 type CollectionItem = {
   id: string;
   canonicalForm: string;
@@ -120,6 +126,7 @@ export default function Home() {
   const [expandedCollectionIds, setExpandedCollectionIds] = useState<string[]>([]);
   const [deletingEncounterId, setDeletingEncounterId] = useState<string | null>(null);
   const [capturedFromPage, setCapturedFromPage] = useState(false);
+  const [dictionaryPreview, setDictionaryPreview] = useState<DictionaryPreview | null>(null);
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
@@ -220,9 +227,20 @@ export default function Home() {
     setMessage(null);
     setResult(null);
     setSentenceAnalysis(null);
+    setDictionaryPreview(null);
     setSavedCanonicalForms([]);
     setSavingCanonical(null);
     try {
+      const lookupTerm = term;
+      void fetch("/api/lookups/preview", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ term: lookupTerm }),
+      }).then(async (previewResponse) => {
+        const previewPayload = await previewResponse.json() as { preview?: DictionaryPreview | null };
+        if (previewResponse.ok && previewPayload.preview) setDictionaryPreview(previewPayload.preview);
+      }).catch(() => undefined);
+
       const response = await fetch("/api/lookups", {
         method: "POST",
         headers: { "content-type": "application/json" },
@@ -239,6 +257,22 @@ export default function Home() {
       setMessage("This lookup could not be completed. Please try again.");
     } finally {
       setLoading(false);
+    }
+  }
+
+  async function pasteAndFocus() {
+    try {
+      const pasted = (await navigator.clipboard.readText()).trim();
+      if (!pasted) {
+        setMessage("Your clipboard is empty.");
+        return;
+      }
+      setTerm(pasted.slice(0, 2000));
+      setMessage(null);
+      document.querySelector<HTMLInputElement>("#term")?.focus();
+    } catch {
+      setMessage("Press and hold in the lookup box, then choose Paste.");
+      document.querySelector<HTMLInputElement>("#term")?.focus();
     }
   }
 
@@ -346,6 +380,7 @@ export default function Home() {
               <label htmlFor="term">English word, phrase, or sentence</label>
               <div className="lookup-row">
                 <input id="term" autoFocus value={term} onChange={(e) => setTerm(e.target.value)} placeholder="e.g. serendipity or paste a sentence" autoComplete="off" />
+                <button className="paste-button" type="button" onClick={() => void pasteAndFocus()}>Paste</button>
                 <button className="primary" type="submit" disabled={loading || !term.trim()}>{loading ? "Looking…" : "Look up"}</button>
               </div>
 
@@ -361,6 +396,18 @@ export default function Home() {
                 </div>
               )}
             </form>
+
+            {dictionaryPreview && (
+              <article className="dictionary-preview" aria-live="polite">
+                <div className="preview-heading">
+                  <div><strong>{dictionaryPreview.word}</strong>{dictionaryPreview.phonetic && <span>{dictionaryPreview.phonetic}</span>}</div>
+                  {loading && <small>Adding Chinese meaning…</small>}
+                </div>
+                {dictionaryPreview.senses.slice(0, 2).map((sense, index) => (
+                  <p key={`${sense.partOfSpeech}-${index}`}><em>{sense.partOfSpeech || "meaning"}</em> {sense.definition}</p>
+                ))}
+              </article>
+            )}
 
             {result && (
               <article className="result-card" aria-live="polite">

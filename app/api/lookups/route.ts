@@ -6,6 +6,7 @@ import { createLookupEvent, deleteLookupEvent, getHistory } from "@/lib/vocabula
 import { classifyInputV2, normalizeTerm, nullableString } from "@/lib/vocabulary/input";
 import { canonicalizeExpression } from "@/lib/vocabulary/language-judgment";
 import { getVocabularyMeaning } from "@/lib/vocabulary/meaning-provider";
+import { findCachedMeaning, storeCachedMeaning } from "@/lib/vocabulary/meaning-cache";
 import { logRequestStage, type TraceContext } from "@/lib/vocabulary/observability";
 import { analyzeSentence, type EnrichedSentenceExpression } from "@/lib/vocabulary/sentence-pipeline";
 import { authenticatedUser, authenticationRequiredBody } from "@/lib/vocabulary/request-user";
@@ -124,10 +125,12 @@ export async function POST(request: NextRequest) {
   } else if (!definition || context || isMultiWord) {
     const meaningStartedAt = Date.now();
     try {
-      const meaning = await getVocabularyMeaning(displayTerm, inputTypeV2, context, trace);
-      definition = meaning.chineseMeaning;
+      const cached = context ? null : await findCachedMeaning(database, normalized, inputTypeV2);
+      const meaning = cached ? null : await getVocabularyMeaning(displayTerm, inputTypeV2, context, trace);
+      definition = cached?.chinese_meaning ?? meaning!.chineseMeaning;
       await updateChineseDefinition(database, entryId, definition);
-      logRequestStage({ trace, stage: "meaning", outcome: "success", durationMs: Date.now() - meaningStartedAt, inputType: inputTypeV2, provider: meaning.provider });
+      if (!cached && !context) await storeCachedMeaning(database, normalized, inputTypeV2, definition, meaning!.provider);
+      logRequestStage({ trace, stage: "meaning", outcome: "success", durationMs: Date.now() - meaningStartedAt, inputType: inputTypeV2, provider: cached ? "cache" : meaning!.provider });
     } catch (error) {
       console.error("Meaning provider failed", error);
       warning = "词已经保存，但这次中文解释暂时没有生成。请稍后再查一次。";

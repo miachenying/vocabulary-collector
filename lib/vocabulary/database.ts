@@ -65,6 +65,11 @@ const createEncounters = `CREATE TABLE IF NOT EXISTS encounters (
   source_url TEXT, note TEXT, encountered_at TEXT NOT NULL, created_at TEXT NOT NULL
 )`;
 
+const createMeaningCache = `CREATE TABLE IF NOT EXISTS meaning_cache (
+  normalized_term TEXT PRIMARY KEY, input_type TEXT NOT NULL, chinese_meaning TEXT NOT NULL,
+  provider TEXT NOT NULL, updated_at TEXT NOT NULL
+)`;
+
 const backfillLookupEventsV2 = `INSERT OR IGNORE INTO lookup_events_v2 (
   id, user_id, raw_input, input_type, status, context_sentence, source_title, source_url, note, looked_up_at, created_at
 )
@@ -145,6 +150,7 @@ export async function ensureVocabularySchema() {
     database.prepare(createVocabularyItems),
     database.prepare(createVocabularySenses),
     database.prepare(createEncounters),
+    database.prepare(createMeaningCache),
   ]);
   await ensureTextColumn(database, "lookup_events_v2", "note");
   await ensureTextColumn(database, "encounters", "note");
