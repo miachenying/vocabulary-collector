@@ -65,6 +65,10 @@ try {
     headers: authenticatedHeaders,
   });
   assert.equal(initResponse.status, 400);
+  const meaningCacheTable = await database.prepare(
+    "SELECT name FROM sqlite_schema WHERE type = 'table' AND name = 'meaning_cache'",
+  ).first();
+  assert.equal(meaningCacheTable?.name, "meaning_cache");
 
   await database.prepare(`INSERT INTO lookup_events_v2 (
     id, user_id, raw_input, input_type, status, context_sentence, source_title, source_url, note, looked_up_at, created_at

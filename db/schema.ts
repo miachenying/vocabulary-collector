@@ -98,3 +98,11 @@ export const encounters = sqliteTable("encounters", {
   index("encounter_sense_time_idx").on(table.vocabularySenseId, table.encounteredAt),
   index("encounter_lookup_idx").on(table.lookupEventId),
 ]);
+
+export const meaningCache = sqliteTable("meaning_cache", {
+  normalizedTerm: text("normalized_term").primaryKey(),
+  inputType: text("input_type").notNull(),
+  chineseMeaning: text("chinese_meaning").notNull(),
+  provider: text("provider").notNull(),
+  updatedAt: text("updated_at").notNull(),
+});
