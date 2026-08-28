@@ -129,7 +129,7 @@ try {
   });
 
   const captureQuery = new URLSearchParams({
-    capture: "1",
+    share: "1",
     term: "caught off guard",
     context: "The announcement caught everyone off guard.",
     sourceTitle: "Captured Article",

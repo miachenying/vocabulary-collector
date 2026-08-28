@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { expressionAppearsInSentence, parseManualSentenceSaveInput } from "../lib/vocabulary/manual-save-input.ts";
-import { sentenceAroundSelection, shareShortcutBaseUrl } from "../lib/vocabulary/reading.ts";
+import { safariCaptureScript, sentenceAroundSelection, shareShortcutBaseUrl } from "../lib/vocabulary/reading.ts";
 import { groupCollectionRows } from "../lib/vocabulary/collection.ts";
 import { extractFocusedContext } from "../extensions/chrome/context.js";
 
@@ -106,4 +106,14 @@ test("share shortcut URL targets the authenticated lookup entry", () => {
     shareShortcutBaseUrl("https://vocabulary.example/"),
     "https://vocabulary.example/?share=1&term=",
   );
+});
+
+test("Safari capture script sends the selection, sentence, title, and source URL", () => {
+  const script = safariCaptureScript("https://vocabulary.example/");
+  assert.doesNotThrow(() => new Function(script));
+  assert.match(script, /searchParams\.set\("term"/);
+  assert.match(script, /searchParams\.set\("context"/);
+  assert.match(script, /searchParams\.set\("sourceTitle"/);
+  assert.match(script, /searchParams\.set\("sourceUrl"/);
+  assert.match(script, /https:\/\/vocabulary\.example\//);
 });
